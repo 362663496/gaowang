@@ -100,6 +100,18 @@ func SendBackupMail(ctx context.Context, cfg MailConfig, filePath string) error 
 	if err != nil {
 		return err
 	}
+	return sendMailMessage(ctx, cfg, message)
+}
+
+func SendBackupNoticeMail(ctx context.Context, cfg MailConfig, filePath string, fileSize int64) error {
+	body := fmt.Sprintf("Database backup was created locally but was too large to attach.\n\nFile: %s\nSize: %d bytes", filePath, fileSize)
+	return sendMailMessage(ctx, cfg, simpleMailMessage(cfg, "Gaowang database backup created", body))
+}
+
+func sendMailMessage(ctx context.Context, cfg MailConfig, message []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	client, err := smtpClient(cfg)
 	if err != nil {
 		return err
@@ -164,6 +176,11 @@ func backupMailMessage(cfg MailConfig, filename string, data []byte) ([]byte, er
 
 	headers := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: Gaowang database backup\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=%s\r\n\r\n", cfg.From, cfg.To, writer.Boundary())
 	return append([]byte(headers), body.Bytes()...), nil
+}
+
+func simpleMailMessage(cfg MailConfig, subject string, body string) []byte {
+	headers := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", cfg.From, cfg.To, subject)
+	return []byte(headers + body)
 }
 
 func smtpClient(cfg MailConfig) (*smtp.Client, error) {

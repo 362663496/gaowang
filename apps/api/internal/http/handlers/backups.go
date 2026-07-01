@@ -59,13 +59,18 @@ func (h BackupHandler) sendMail(ctx context.Context, job *models.BackupJob) {
 		job.EmailStatus = "not_configured"
 		return
 	}
-	if !services.ShouldAttachBackup(job.FileSize, h.Cfg.BackupAttachmentLimitMB) {
-		job.EmailStatus = "skipped_oversize"
-		return
-	}
 	cfg := services.MailConfig{
 		Host: h.Cfg.SMTPHost, Port: h.Cfg.SMTPPort, Username: h.Cfg.SMTPUsername, Password: h.Cfg.SMTPPassword,
 		From: h.Cfg.SMTPFrom, To: h.Cfg.SMTPTo, TLSMode: h.Cfg.SMTPTLS,
+	}
+	if !services.ShouldAttachBackup(job.FileSize, h.Cfg.BackupAttachmentLimitMB) {
+		if err := services.SendBackupNoticeMail(ctx, cfg, job.FilePath, job.FileSize); err != nil {
+			job.EmailStatus = "failed"
+			job.ErrorMessage = err.Error()
+			return
+		}
+		job.EmailStatus = "sent_without_attachment"
+		return
 	}
 	if err := services.SendBackupMail(ctx, cfg, job.FilePath); err != nil {
 		job.EmailStatus = "failed"
