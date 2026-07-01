@@ -47,7 +47,7 @@ func (s BackupService) Run(ctx context.Context) (string, int64, error) {
 	if err := os.MkdirAll(s.BackupDir, 0o755); err != nil {
 		return "", 0, fmt.Errorf("create backup dir: %w", err)
 	}
-	stamp := time.Now().Format("20060102-150405")
+	stamp := time.Now().Format("20060102-150405.000000000")
 	sqlPath := filepath.Join(s.BackupDir, fmt.Sprintf("gaowang-%s.sql", stamp))
 	gzPath := filepath.Join(s.BackupDir, backupFilename(stamp))
 
@@ -56,9 +56,12 @@ func (s BackupService) Run(ctx context.Context) (string, int64, error) {
 		return "", 0, fmt.Errorf("pg_dump failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 	if err := gzipFile(sqlPath, gzPath); err != nil {
+		_ = os.Remove(gzPath)
 		return "", 0, err
 	}
-	_ = os.Remove(sqlPath)
+	if err := os.Remove(sqlPath); err != nil {
+		return "", 0, fmt.Errorf("remove plain sql backup: %w", err)
+	}
 
 	info, err := os.Stat(gzPath)
 	if err != nil {
@@ -74,7 +77,7 @@ func gzipFile(src string, dst string) (err error) {
 	}
 	defer func() { err = closeWithError(err, input) }()
 
-	output, err := os.Create(dst)
+	output, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create gzip backup: %w", err)
 	}
@@ -185,16 +188,22 @@ func simpleMailMessage(cfg MailConfig, subject string, body string) []byte {
 
 func smtpClient(cfg MailConfig) (*smtp.Client, error) {
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", cfg.Port))
+	dialer := net.Dialer{Timeout: 15 * time.Second}
 	if cfg.TLSMode == "smtps" {
-		conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12})
+		conn, err := tls.DialWithDialer(&dialer, "tcp", addr, &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12})
 		if err != nil {
 			return nil, fmt.Errorf("smtp tls dial: %w", err)
 		}
 		return smtp.NewClient(conn, cfg.Host)
 	}
-	client, err := smtp.Dial(addr)
+	conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("smtp dial: %w", err)
+	}
+	client, err := smtp.NewClient(conn, cfg.Host)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("smtp client: %w", err)
 	}
 	if cfg.TLSMode == "starttls" {
 		if err := client.StartTLS(&tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}); err != nil {

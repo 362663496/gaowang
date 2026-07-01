@@ -104,6 +104,9 @@ func (s InventoryService) CreateSalesOutbound(input OutboundInput) error {
 		}
 		costUnit := snapshot.MovingAverageCostCents
 		costAmount := input.Quantity * costUnit
+		if input.Quantity == snapshot.Quantity {
+			costAmount = snapshot.InventoryValueCents
+		}
 		revenue := input.Quantity * input.SaleUnitCents
 		snapshot.Quantity -= input.Quantity
 		snapshot.InventoryValueCents -= costAmount

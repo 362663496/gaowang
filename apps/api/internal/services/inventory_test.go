@@ -112,6 +112,44 @@ func Test_InventoryService_records_inbound_sale_and_adjustment(t *testing.T) {
 	}
 }
 
+func Test_InventoryService_charges_remaining_value_when_sale_empties_stock(t *testing.T) {
+	// Given
+	db := newInventoryTestDB(t)
+	product := models.Product{Name: "Coffee", Code: "COF", Enabled: true}
+	operator := models.User{Name: "Admin", Email: "admin2@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
+	shop := models.Shop{Name: "Second", Enabled: true}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	if err := db.Create(&operator).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&shop).Error; err != nil {
+		t.Fatalf("create shop: %v", err)
+	}
+	service := InventoryService{DB: db}
+	if err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 3, UnitCents: 100, OperatorID: operator.ID}); err != nil {
+		t.Fatalf("CreateInbound() error = %v", err)
+	}
+	if err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 2, UnitCents: 101, OperatorID: operator.ID}); err != nil {
+		t.Fatalf("CreateInbound() error = %v", err)
+	}
+
+	// When
+	if err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 5, SaleUnitCents: 150, OperatorID: operator.ID}); err != nil {
+		t.Fatalf("CreateSalesOutbound() error = %v", err)
+	}
+
+	// Then
+	var outbound models.StockMovement
+	if err := db.First(&outbound, "type = ?", models.MovementTypeSalesOutbound).Error; err != nil {
+		t.Fatalf("load outbound movement: %v", err)
+	}
+	if outbound.CostAmountCents != 502 || outbound.GrossProfitCents != 248 {
+		t.Fatalf("outbound cost/gross = %d/%d, want 502/248", outbound.CostAmountCents, outbound.GrossProfitCents)
+	}
+}
+
 func newInventoryTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
