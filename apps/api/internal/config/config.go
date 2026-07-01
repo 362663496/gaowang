@@ -56,7 +56,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		APIAddr:                 envString("API_ADDR", ":8080"),
 		DatabaseURL:             databaseURL,
-		AuthSecret:              envString("AUTH_SECRET", "local-dev-auth-secret-at-least-32-bytes"),
+		AuthSecret:              envString("AUTH_SECRET", ""),
 		UploadDir:               envString("UPLOAD_DIR", "/app/uploads"),
 		BackupDir:               envString("BACKUP_DIR", "/app/backups"),
 		BackupRetentionDays:     backupRetentionDays,
