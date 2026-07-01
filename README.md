@@ -12,7 +12,7 @@ Self-hosted lightweight inventory admin system.
 
 - `make api-test`: run Go tests.
 - `make api-run`: run Go API locally.
-- `make web-install`: install web dependencies.
-- `make web-dev`: run Next.js locally.
+- `make web-install`: install web dependencies after the web app is scaffolded.
+- `make web-dev`: run Next.js locally after the web app is scaffolded.
 - `make compose-up`: run the stack.
 - `make compose-down`: stop the stack.

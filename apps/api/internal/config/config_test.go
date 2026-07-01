@@ -80,3 +80,17 @@ func Test_Load_returns_error_when_auth_secret_too_short(t *testing.T) {
 		t.Fatalf("Load() error = %v, want %v", err, ErrAuthSecretTooShort)
 	}
 }
+
+func Test_Load_returns_error_when_auth_secret_missing(t *testing.T) {
+	// Given
+	t.Setenv("DATABASE_URL", "host=localhost user=gaowang dbname=gaowang sslmode=disable")
+	t.Setenv("AUTH_SECRET", "")
+
+	// When
+	_, err := Load()
+
+	// Then
+	if !errors.Is(err, ErrAuthSecretTooShort) {
+		t.Fatalf("Load() error = %v, want %v", err, ErrAuthSecretTooShort)
+	}
+}
