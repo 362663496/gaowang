@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   ArrowLeftRight,
@@ -32,6 +32,7 @@ const navItems = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [session, setSession] = useState(readDevSession);
 
@@ -45,6 +46,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("storage", update);
     };
   }, []);
+
+  useEffect(() => {
+    if (!session.userId) {
+      router.replace("/login");
+    }
+  }, [router, session.userId]);
+
+  if (!session.userId) {
+    return <main className="min-h-dvh bg-[var(--surface-page)]" />;
+  }
 
   return (
     <div className="min-h-dvh bg-[var(--surface-page)] text-[var(--text-primary)]">
