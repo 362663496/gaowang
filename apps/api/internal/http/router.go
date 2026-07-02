@@ -33,12 +33,14 @@ func NewRouter(cfg config.Config, database *gorm.DB) *gin.Engine {
 }
 
 func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB) {
+	authHandler := handlers.AuthHandler{DB: database}
 	productHandler := handlers.ProductHandler{DB: database, Cfg: cfg}
 	shopHandler := handlers.ShopHandler{DB: database}
 	inventoryHandler := handlers.InventoryHandler{DB: database}
 	movementHandler := handlers.MovementHandler{DB: database}
 	reportHandler := handlers.ReportHandler{DB: database}
 
+	group.POST("/auth/password", authHandler.ChangePassword)
 	group.GET("/products", productHandler.List)
 	group.POST("/products", productHandler.Create)
 	group.GET("/shops", shopHandler.List)

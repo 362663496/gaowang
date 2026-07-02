@@ -9,14 +9,16 @@ import {
   Boxes,
   DatabaseBackup,
   LayoutDashboard,
+  LogOut,
   Menu,
   Package,
   Settings,
   Store,
+  Users,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { devSessionEvent, readDevSession } from "@/lib/api";
+import { apiDeleteSession, devSessionEvent, readDevSession, type Role } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -26,6 +28,7 @@ const navItems = [
   { label: "当前库存", href: "/inventory", icon: Boxes },
   { label: "流水记录", href: "/stock-movements", icon: ArrowLeftRight },
   { label: "报表", href: "/reports", icon: BarChart3 },
+  { label: "用户管理", href: "/users", icon: Users, roles: ["admin"] },
   { label: "备份", href: "/settings/backups", icon: DatabaseBackup },
   { label: "设置", href: "/settings", icon: Settings },
 ];
@@ -53,6 +56,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [router, session.userId]);
 
+  function logout() {
+    apiDeleteSession();
+    router.replace("/login");
+  }
+
   if (!session.userId) {
     return <main className="min-h-dvh bg-[var(--surface-page)]" />;
   }
@@ -60,7 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-dvh bg-[var(--surface-page)] text-[var(--text-primary)]">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[232px] border-r border-white/10 bg-[var(--surface-sidebar)] px-3 py-4 text-slate-300 lg:block">
-        <SidebarContent pathname={pathname} />
+        <SidebarContent pathname={pathname} role={session.role} />
       </aside>
 
       <div className="lg:pl-[232px]">
@@ -71,9 +79,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
             <div className="hidden text-sm font-medium text-[var(--text-secondary)] sm:block">库存后台</div>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs text-[var(--text-secondary)]">
-            <span className={cn("h-2 w-2 rounded-full", session.userId ? "bg-emerald-500" : "bg-amber-500")} />
-            <span>{session.userId ? `${session.role} · ${session.userId.slice(0, 8)}` : "未设置身份"}</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+              <span className={cn("h-2 w-2 rounded-full", session.userId ? "bg-emerald-500" : "bg-amber-500")} />
+              <span>{session.userId ? `${session.role} · ${session.userId.slice(0, 8)}` : "未设置身份"}</span>
+            </div>
+            <Button aria-label="退出登录" size="icon" title="退出登录" type="button" variant="ghost" onClick={logout}>
+              <LogOut className="h-4 w-4" />
+            </Button>
           </div>
         </header>
 
@@ -89,7 +102,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <X className="h-5 w-5 text-white" />
               </Button>
             </div>
-            <SidebarContent pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent pathname={pathname} role={session.role} onNavigate={() => setMobileOpen(false)} />
           </aside>
         </div>
       ) : null}
@@ -97,7 +110,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function SidebarContent({ pathname, role, onNavigate }: { pathname: string; role: Role; onNavigate?: () => void }) {
   return (
     <>
       <div className="mb-6 px-2">
@@ -105,7 +118,7 @@ function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate
         <div className="mt-1 text-xs text-slate-500">Inventory Command</div>
       </div>
       <nav className="grid gap-1">
-        {navItems.map((item) => {
+        {navItems.filter((item) => !item.roles || item.roles.includes(role)).map((item) => {
           const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
           const Icon = item.icon;
           return (
