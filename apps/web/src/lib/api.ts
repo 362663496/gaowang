@@ -43,7 +43,11 @@ export async function request<T>(path: string, init: RequestInit): Promise<T> {
     },
   });
   if (!response.ok) {
-    throw await readError(response);
+    const error = await readError(response);
+    if (error.status === 401 || error.status === 403) {
+      redirectToLogin();
+    }
+    throw error;
   }
   if (response.status === 204) {
     return undefined as T;
@@ -115,5 +119,12 @@ function getStorage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> | und
 function notifyDevSessionChanged(): void {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(devSessionEvent));
+  }
+}
+
+function redirectToLogin(): void {
+  apiDeleteSession();
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    window.location.assign("/login");
   }
 }

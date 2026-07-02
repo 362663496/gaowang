@@ -3,15 +3,17 @@ import { ApiError, apiDeleteSession, apiGet, apiPost, readDevSession, writeDevSe
 
 const originalFetch = globalThis.fetch;
 const store = new Map<string, string>();
+let locationAssign: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   store.clear();
+  locationAssign = vi.fn();
   const localStorage = {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => store.set(key, value),
     removeItem: (key: string) => store.delete(key),
   };
-  vi.stubGlobal("window", { localStorage, dispatchEvent: vi.fn() });
+  vi.stubGlobal("window", { localStorage, dispatchEvent: vi.fn(), location: { pathname: "/dashboard", assign: locationAssign } });
 });
 
 afterEach(() => {
@@ -49,6 +51,18 @@ describe("api client", () => {
       message: "bad input",
       status: 400,
     });
+  });
+
+  it("clears the session and redirects to login when auth expires", async () => {
+    writeDevSession({ userId: "00000000-0000-0000-0000-000000000001", role: "admin" });
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "login required" } }), { status: 401 }),
+    );
+
+    await expect(apiGet("/users")).rejects.toMatchObject({ status: 401 });
+
+    expect(readDevSession()).toEqual({ userId: "", role: "admin" });
+    expect(locationAssign).toHaveBeenCalledWith("/login");
   });
 
   it("stores and clears the development session", () => {
