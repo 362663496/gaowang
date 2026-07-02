@@ -73,6 +73,10 @@ export type BackupJob = {
   UpdatedAt: string;
 };
 
+export type AppSettings = {
+  backup_email_recipient: string;
+};
+
 export type User = {
   id: string;
   name: string;

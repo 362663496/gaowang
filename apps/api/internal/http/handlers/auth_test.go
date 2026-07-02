@@ -64,6 +64,23 @@ func Test_ChangePassword_rejects_wrong_current_password(t *testing.T) {
 	}
 }
 
+func Test_Login_accepts_username_or_email(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAuthTestDB(t)
+	createAuthTestUser(t, db, "password123")
+	router := apihttp.NewRouter(config.Config{}, db)
+
+	for _, login := range []string{"Admin", "admin@example.com"} {
+		response := postLogin(t, router, map[string]string{
+			"login":    login,
+			"password": "password123",
+		})
+		if response.Code != http.StatusOK {
+			t.Fatalf("login %q status = %d, want %d; body = %s", login, response.Code, http.StatusOK, response.Body.String())
+		}
+	}
+}
+
 func newAuthTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -99,6 +116,19 @@ func postPasswordChange(t *testing.T, router http.Handler, userID uuid.UUID, pay
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Dev-User-ID", userID.String())
 	request.Header.Set("X-Dev-Role", "admin")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func postLogin(t *testing.T, router http.Handler, payload map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response

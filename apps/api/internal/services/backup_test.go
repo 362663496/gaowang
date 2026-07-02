@@ -21,3 +21,11 @@ func Test_BackupFilename_includes_stamp(t *testing.T) {
 		t.Fatalf("filename = %q, want gaowang-20260701-120000.sql.gz", got)
 	}
 }
+
+func Test_PgDumpDatabaseURL_removes_gorm_timezone_option(t *testing.T) {
+	got := pgDumpDatabaseURL("host=127.0.0.1 user=gaowang dbname=gaowang TimeZone=Asia/Shanghai sslmode=disable")
+
+	if got != "host=127.0.0.1 user=gaowang dbname=gaowang sslmode=disable" {
+		t.Fatalf("database url = %q", got)
+	}
+}

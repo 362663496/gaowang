@@ -51,7 +51,7 @@ func (s BackupService) Run(ctx context.Context) (string, int64, error) {
 	sqlPath := filepath.Join(s.BackupDir, fmt.Sprintf("gaowang-%s.sql", stamp))
 	gzPath := filepath.Join(s.BackupDir, backupFilename(stamp))
 
-	cmd := exec.CommandContext(ctx, "pg_dump", s.DatabaseURL, "-f", sqlPath)
+	cmd := exec.CommandContext(ctx, "pg_dump", pgDumpDatabaseURL(s.DatabaseURL), "-f", sqlPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", 0, fmt.Errorf("pg_dump failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
@@ -89,6 +89,19 @@ func gzipFile(src string, dst string) (err error) {
 		return fmt.Errorf("gzip backup: %w", err)
 	}
 	return nil
+}
+
+func pgDumpDatabaseURL(databaseURL string) string {
+	fields := strings.Fields(databaseURL)
+	filtered := fields[:0]
+	for _, field := range fields {
+		key, _, _ := strings.Cut(field, "=")
+		if strings.EqualFold(key, "timezone") {
+			continue
+		}
+		filtered = append(filtered, field)
+	}
+	return strings.Join(filtered, " ")
 }
 
 func SendBackupMail(ctx context.Context, cfg MailConfig, filePath string) error {

@@ -46,7 +46,7 @@ export default function UsersPage() {
       <section className="rounded-lg border border-[var(--border-subtle)] bg-white p-4">
         <h2 className="font-semibold">新增用户</h2>
         <form className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4" onSubmit={createUser}>
-          <Field label="姓名"><Input name="name" required /></Field>
+          <Field label="用户名"><Input name="name" required /></Field>
           <Field label="邮箱"><Input name="email" required type="email" /></Field>
           <Field label="密码"><Input minLength={8} name="password" required type="password" /></Field>
           <Field label="角色">

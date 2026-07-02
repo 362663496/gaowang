@@ -20,7 +20,7 @@ export default function LoginPage() {
     const form = new FormData(event.currentTarget);
     try {
       const data = await apiPost<{ user: User }>("/auth/login", {
-        email: String(form.get("email") ?? ""),
+        login: String(form.get("login") ?? ""),
         password: String(form.get("password") ?? ""),
       });
       writeDevSession({ userId: data.user.id, role: data.user.role });
@@ -37,11 +37,11 @@ export default function LoginPage() {
       <section className="w-full max-w-sm rounded-lg border border-[var(--border-subtle)] bg-white p-5 shadow-sm">
         <div>
           <h1 className="text-xl font-semibold">登录 Gaowang</h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">使用后台用户邮箱和密码进入库存系统。</p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">使用后台用户名或邮箱进入库存系统。</p>
         </div>
         <form className="mt-5 grid gap-4" onSubmit={submit}>
           {error ? <ErrorBlock message={error} /> : null}
-          <Field label="邮箱"><Input name="email" required type="email" /></Field>
+          <Field label="用户名或邮箱"><Input name="login" required /></Field>
           <Field label="密码"><Input minLength={8} name="password" required type="password" /></Field>
           <Button className="w-full" loading={saving} type="submit">登录</Button>
         </form>

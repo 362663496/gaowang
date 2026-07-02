@@ -56,9 +56,12 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 func mountAdmin(group *gin.RouterGroup, cfg config.Config, database *gorm.DB) {
 	userHandler := handlers.UserHandler{DB: database}
 	backupHandler := handlers.BackupHandler{DB: database, Cfg: cfg}
+	settingHandler := handlers.SettingHandler{DB: database, Cfg: cfg}
 
 	group.GET("/users", userHandler.List)
 	group.POST("/users", userHandler.Create)
 	group.GET("/backups/latest", backupHandler.Latest)
 	group.POST("/backups/run", backupHandler.Run)
+	group.GET("/settings", settingHandler.Get)
+	group.POST("/settings", settingHandler.Update)
 }

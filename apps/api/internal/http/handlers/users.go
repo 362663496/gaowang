@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"gaowang/apps/api/internal/models"
 	"gaowang/apps/api/internal/services"
@@ -44,6 +45,21 @@ func (h UserHandler) Create(c *gin.Context) {
 	}
 	if req.Role != models.RoleAdmin && req.Role != models.RoleStaff {
 		writeError(c, http.StatusBadRequest, "VALIDATION", "role must be admin or staff")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Email = strings.TrimSpace(req.Email)
+	if req.Name == "" {
+		writeError(c, http.StatusBadRequest, "VALIDATION", "username is required")
+		return
+	}
+	var existing int64
+	if err := h.DB.Model(&models.User{}).Where("name = ?", req.Name).Count(&existing).Error; err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to check username")
+		return
+	}
+	if existing > 0 {
+		writeError(c, http.StatusBadRequest, "USER_CREATE_FAILED", "username already exists")
 		return
 	}
 	hash, err := services.HashPassword(req.Password)

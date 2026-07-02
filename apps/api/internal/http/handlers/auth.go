@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"gaowang/apps/api/internal/models"
 	"gaowang/apps/api/internal/services"
@@ -15,7 +16,8 @@ type AuthHandler struct {
 }
 
 type loginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
+	Login    string `json:"login"`
+	Email    string `json:"email"`
 	Password string `json:"password" binding:"required,min=8"`
 }
 
@@ -29,12 +31,20 @@ func (h AuthHandler) Login(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
+	identifier := strings.TrimSpace(req.Login)
+	if identifier == "" {
+		identifier = strings.TrimSpace(req.Email)
+	}
+	if identifier == "" {
+		writeError(c, http.StatusBadRequest, "VALIDATION", "username or email is required")
+		return
+	}
 
 	var user userResponse
 	var passwordHash string
 	err := h.DB.Table("users").
 		Select("id, name, email, role, password_hash").
-		Where("email = ? AND enabled = ?", req.Email, true).
+		Where("enabled = ? AND (email = ? OR name = ?)", true, identifier, identifier).
 		Row().
 		Scan(&user.ID, &user.Name, &user.Email, &user.Role, &passwordHash)
 	if err != nil || !services.PasswordMatches(passwordHash, req.Password) {

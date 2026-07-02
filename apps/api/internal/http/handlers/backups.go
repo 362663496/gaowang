@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"gaowang/apps/api/internal/config"
@@ -12,6 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const backupRecipientSettingKey = "backup.email_recipient"
+
 type BackupHandler struct {
 	DB  *gorm.DB
 	Cfg config.Config
@@ -19,7 +22,7 @@ type BackupHandler struct {
 
 func (h BackupHandler) Run(c *gin.Context) {
 	started := time.Now()
-	job := models.BackupJob{StartedAt: started, Status: models.BackupStatusRunning, Recipient: h.Cfg.SMTPTo}
+	job := models.BackupJob{StartedAt: started, Status: models.BackupStatusRunning, Recipient: h.backupRecipient()}
 	_ = h.DB.Create(&job).Error
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
@@ -55,13 +58,13 @@ func (h BackupHandler) Latest(c *gin.Context) {
 }
 
 func (h BackupHandler) sendMail(ctx context.Context, job *models.BackupJob) {
-	if h.Cfg.SMTPHost == "" || h.Cfg.SMTPTo == "" || h.Cfg.SMTPFrom == "" {
+	if h.Cfg.SMTPHost == "" || job.Recipient == "" || h.Cfg.SMTPFrom == "" {
 		job.EmailStatus = "not_configured"
 		return
 	}
 	cfg := services.MailConfig{
 		Host: h.Cfg.SMTPHost, Port: h.Cfg.SMTPPort, Username: h.Cfg.SMTPUsername, Password: h.Cfg.SMTPPassword,
-		From: h.Cfg.SMTPFrom, To: h.Cfg.SMTPTo, TLSMode: h.Cfg.SMTPTLS,
+		From: h.Cfg.SMTPFrom, To: job.Recipient, TLSMode: h.Cfg.SMTPTLS,
 	}
 	if !services.ShouldAttachBackup(job.FileSize, h.Cfg.BackupAttachmentLimitMB) {
 		if err := services.SendBackupNoticeMail(ctx, cfg, job.FilePath, job.FileSize); err != nil {
@@ -78,4 +81,14 @@ func (h BackupHandler) sendMail(ctx context.Context, job *models.BackupJob) {
 		return
 	}
 	job.EmailStatus = "sent"
+}
+
+func (h BackupHandler) backupRecipient() string {
+	var setting models.Setting
+	if h.DB != nil && h.DB.First(&setting, "key = ?", backupRecipientSettingKey).Error == nil {
+		if value := strings.TrimSpace(setting.Value); value != "" {
+			return value
+		}
+	}
+	return strings.TrimSpace(h.Cfg.SMTPTo)
 }
