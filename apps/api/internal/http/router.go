@@ -12,6 +12,9 @@ import (
 func NewRouter(cfg config.Config, database *gorm.DB) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
+	if cfg.UploadDir != "" {
+		router.Static("/uploads", cfg.UploadDir)
+	}
 
 	api := router.Group("/api/v1")
 	api.GET("/health", handlers.Health)

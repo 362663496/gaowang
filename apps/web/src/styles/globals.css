@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --color-page: #f6f7f9;
+  --color-panel: #ffffff;
+  --color-sidebar: #111317;
+  --color-ink: #15171c;
+  --color-muted: #5d6572;
+  --color-line: #e3e6ec;
+  --ease-smooth: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root {
+  --surface-page: #f6f7f9;
+  --surface-panel: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sidebar: #111317;
+  --text-primary: #15171c;
+  --text-secondary: #5d6572;
+  --text-muted: #8b929e;
+  --border-subtle: #e3e6ec;
+  --accent-primary: #5e6ad2;
+  --accent-strong: #4852bd;
+  --status-success: #138a45;
+  --status-warning: #b7791f;
+  --status-error: #c93535;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--surface-page);
+}
+
+body {
+  margin: 0;
+  background: var(--surface-page);
+  color: var(--text-primary);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}
