@@ -7,8 +7,9 @@ import { Field, Input, Select } from "@/components/ui/fields";
 import { MessageBar } from "@/components/ui/message";
 import { ErrorBlock } from "@/components/ui/state";
 import type { User } from "@/features/types";
+import { submitCreateUser } from "@/features/users/create-user";
 import { useMessage } from "@/features/use-message";
-import { apiGet, apiPost, readDevSession, type Role, writeDevSession } from "@/lib/api";
+import { apiGet, readDevSession, type Role, writeDevSession } from "@/lib/api";
 
 export default function SettingsPage() {
   const [userId, setUserId] = useState("");
@@ -41,16 +42,8 @@ export default function SettingsPage() {
   }
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
     try {
-      await apiPost<{ item: User }>("/users", {
-        name: String(form.get("name") ?? ""),
-        email: String(form.get("email") ?? ""),
-        password: String(form.get("password") ?? ""),
-        role: String(form.get("role") ?? "staff"),
-      });
-      event.currentTarget.reset();
+      await submitCreateUser(event);
       show("用户已创建");
       void loadUsers();
     } catch (err) {
