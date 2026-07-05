@@ -148,7 +148,7 @@ function ProductsTable({ products }: { products: Product[] }) {
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3">
                   <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black/[0.03] text-xs text-[var(--text-muted)]">
-                    {product.ImagePath ? <Image alt={`${product.Name} 图片`} className="h-full w-full object-cover" height={40} src={product.ImagePath} width={40} /> : "图"}
+                    {product.ImagePath ? <Image alt={`${product.Name} 图片`} className="h-full w-full object-cover" height={40} src={product.ImagePath} unoptimized width={40} /> : "图"}
                   </div>
                   <div className="min-w-0">
                     <div className="truncate font-medium">{product.Name}</div>

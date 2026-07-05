@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -18,14 +19,14 @@ type InventoryHandler struct {
 type inboundRequest struct {
 	ProductID string `json:"product_id" binding:"required"`
 	Quantity  int64  `json:"quantity" binding:"required,gt=0"`
-	UnitCents int64  `json:"unit_cents" binding:"required,gte=0"`
+	UnitCents *int64 `json:"unit_cents" binding:"required,gte=0"`
 }
 
 type outboundRequest struct {
 	ProductID     string `json:"product_id" binding:"required"`
 	ShopID        string `json:"shop_id" binding:"required"`
 	Quantity      int64  `json:"quantity" binding:"required,gt=0"`
-	SaleUnitCents int64  `json:"sale_unit_cents" binding:"required,gte=0"`
+	SaleUnitCents *int64 `json:"sale_unit_cents" binding:"required,gte=0"`
 }
 
 type adjustmentRequest struct {
@@ -53,7 +54,7 @@ func (h InventoryHandler) CreateInbound(c *gin.Context) {
 		return
 	}
 	err := services.InventoryService{DB: h.DB}.CreateInbound(services.InboundInput{
-		ProductID: productID, Quantity: req.Quantity, UnitCents: req.UnitCents, OperatorID: currentUserID(c),
+		ProductID: productID, Quantity: req.Quantity, UnitCents: *req.UnitCents, OperatorID: currentUserID(c),
 	})
 	writeStockResult(c, err)
 }
@@ -72,9 +73,30 @@ func (h InventoryHandler) CreateSalesOutbound(c *gin.Context) {
 		return
 	}
 	err := services.InventoryService{DB: h.DB}.CreateSalesOutbound(services.OutboundInput{
-		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, SaleUnitCents: req.SaleUnitCents, OperatorID: currentUserID(c),
+		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, SaleUnitCents: *req.SaleUnitCents, OperatorID: currentUserID(c),
 	})
 	writeStockResult(c, err)
+}
+
+func (r *outboundRequest) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		ProductID          string `json:"product_id"`
+		ShopID             string `json:"shop_id"`
+		Quantity           int64  `json:"quantity"`
+		SaleUnitCents      *int64 `json:"sale_unit_cents"`
+		CamelSaleUnitCents *int64 `json:"saleUnitCents"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	r.ProductID = payload.ProductID
+	r.ShopID = payload.ShopID
+	r.Quantity = payload.Quantity
+	r.SaleUnitCents = payload.SaleUnitCents
+	if r.SaleUnitCents == nil {
+		r.SaleUnitCents = payload.CamelSaleUnitCents
+	}
+	return nil
 }
 
 func (h InventoryHandler) CreateAdjustment(c *gin.Context) {
