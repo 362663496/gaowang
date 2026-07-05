@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
-import type { InventorySnapshot, SalesSummary } from "@/features/types";
+import type { InventorySnapshot, ProductRankingRow, SalesSummary, SalesTrendRow, ShopRankingRow } from "@/features/types";
 import { apiGet } from "@/lib/api";
 import { formatMoney, formatQuantity } from "@/lib/format";
 
 export default function ReportsPage() {
   const [summary, setSummary] = useState<SalesSummary | null>(null);
+  const [trend, setTrend] = useState<SalesTrendRow[]>([]);
+  const [products, setProducts] = useState<ProductRankingRow[]>([]);
+  const [shops, setShops] = useState<ShopRankingRow[]>([]);
   const [inventory, setInventory] = useState<InventorySnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -17,11 +20,17 @@ export default function ReportsPage() {
     setLoading(true);
     setError("");
     try {
-      const [report, stock] = await Promise.all([
+      const [report, salesTrend, productRanking, shopRanking, stock] = await Promise.all([
         apiGet<{ summary: SalesSummary }>("/reports/sales-summary"),
+        apiGet<{ items: SalesTrendRow[] }>("/reports/sales-trend"),
+        apiGet<{ items: ProductRankingRow[] }>("/reports/product-ranking"),
+        apiGet<{ items: ShopRankingRow[] }>("/reports/shop-ranking"),
         apiGet<{ items: InventorySnapshot[] }>("/inventory"),
       ]);
       setSummary(report.summary);
+      setTrend(salesTrend.items);
+      setProducts(productRanking.items);
+      setShops(shopRanking.items);
       setInventory(stock.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
@@ -51,6 +60,11 @@ export default function ReportsPage() {
         <Metric label="库存金额" value={formatMoney(inventoryValue)} />
         <Metric label="低库存品类" value={formatQuantity(lowStock.length)} />
       </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+        <TrendPanel rows={trend} />
+        <RankingPanel title="商品销售排行" rows={products.map((item) => ({ id: item.product_id, label: item.product_name, sublabel: item.product_code, revenue: item.revenue_cents, quantity: item.quantity_sold, gross: item.gross_profit_cents }))} />
+      </div>
+      <RankingPanel title="店铺销售排行" rows={shops.map((item) => ({ id: item.shop_id, label: item.shop_name, revenue: item.revenue_cents, quantity: item.quantity_sold, gross: item.gross_profit_cents }))} />
       <section className="rounded-lg border border-[var(--border-subtle)] bg-white">
         <div className="border-b border-[var(--border-subtle)] px-4 py-3 font-medium">低库存列表</div>
         {lowStock.length === 0 ? (
@@ -79,6 +93,78 @@ export default function ReportsPage() {
   );
 }
 
+function TrendPanel({ rows }: { rows: SalesTrendRow[] }) {
+  const maxRevenue = Math.max(...rows.map((row) => row.revenue_cents), 0);
+  return (
+    <section className="rounded-lg border border-[var(--border-subtle)] bg-white">
+      <div className="border-b border-[var(--border-subtle)] px-4 py-3 font-medium">近 30 天销售趋势</div>
+      {rows.length === 0 ? (
+        <div className="p-4"><EmptyBlock title="暂无销售趋势" /></div>
+      ) : (
+        <div className="grid gap-3 p-4">
+          {rows.map((row) => (
+            <div className="grid gap-2" key={row.day}>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="font-mono text-xs text-[var(--text-secondary)]">{row.day}</span>
+                <span className="font-medium">{formatMoney(row.revenue_cents)}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-black/[0.05]">
+                <div className="h-full rounded-full bg-[var(--accent-primary)]" style={{ width: percent(row.revenue_cents, maxRevenue) }} />
+              </div>
+              <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
+                <span>销量 {formatQuantity(row.quantity_sold)}</span>
+                <span>毛利 {formatMoney(row.gross_profit_cents)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+type RankingItem = {
+  id: string;
+  label: string;
+  sublabel?: string;
+  revenue: number;
+  quantity: number;
+  gross: number;
+};
+
+function RankingPanel({ title, rows }: { title: string; rows: RankingItem[] }) {
+  const maxRevenue = Math.max(...rows.map((row) => row.revenue), 0);
+  return (
+    <section className="rounded-lg border border-[var(--border-subtle)] bg-white">
+      <div className="border-b border-[var(--border-subtle)] px-4 py-3 font-medium">{title}</div>
+      {rows.length === 0 ? (
+        <div className="p-4"><EmptyBlock title="暂无销售排行" /></div>
+      ) : (
+        <div className="divide-y divide-[var(--border-subtle)]">
+          {rows.map((row, index) => (
+            <div className="grid gap-2 px-4 py-3" key={row.id}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{index + 1}. {row.label}</div>
+                  {row.sublabel ? <div className="text-xs text-[var(--text-secondary)]">{row.sublabel}</div> : null}
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="font-medium">{formatMoney(row.revenue)}</div>
+                  <div className="text-xs text-[var(--text-secondary)]">销量 {formatQuantity(row.quantity)}</div>
+                </div>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-black/[0.05]">
+                <div className="h-full rounded-full bg-[var(--accent-primary)]" style={{ width: percent(row.revenue, maxRevenue) }} />
+              </div>
+              <div className="text-xs text-[var(--text-secondary)]">毛利 {formatMoney(row.gross)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <section className="rounded-lg border border-[var(--border-subtle)] bg-white p-4">
@@ -86,4 +172,11 @@ function Metric({ label, value }: { label: string; value: string }) {
       <div className="mt-2 text-xl font-semibold">{value}</div>
     </section>
   );
+}
+
+function percent(value: number, max: number): string {
+  if (max <= 0) {
+    return "0%";
+  }
+  return `${Math.max(4, Math.round((value / max) * 100))}%`;
 }

@@ -48,9 +48,11 @@ func (h AuthHandler) Login(c *gin.Context) {
 		Row().
 		Scan(&user.ID, &user.Name, &user.Email, &user.Role, &passwordHash)
 	if err != nil || !services.PasswordMatches(passwordHash, req.Password) {
+		recordAuditForActor(c, h.DB, nil, "auth.login_failed", "auth", identifier, map[string]string{"login": identifier})
 		writeError(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
 		return
 	}
+	recordAuditForActor(c, h.DB, &user.ID, "auth.login_succeeded", "user", user.ID.String(), map[string]string{"login": identifier})
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
@@ -82,5 +84,6 @@ func (h AuthHandler) ChangePassword(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to change password")
 		return
 	}
+	recordAudit(c, h.DB, "auth.password_changed", "user", user.ID.String(), nil)
 	c.Status(http.StatusNoContent)
 }

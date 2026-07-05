@@ -59,6 +59,47 @@ export type SalesSummary = {
   gross_profit_cents: number;
 };
 
+export type SalesTrendRow = {
+  day: string;
+  revenue_cents: number;
+  cost_cents: number;
+  gross_profit_cents: number;
+  quantity_sold: number;
+};
+
+export type ProductRankingRow = {
+  product_id: string;
+  product_name: string;
+  product_code: string;
+  revenue_cents: number;
+  cost_cents: number;
+  gross_profit_cents: number;
+  quantity_sold: number;
+  movement_count: number;
+};
+
+export type ShopRankingRow = {
+  shop_id: string;
+  shop_name: string;
+  revenue_cents: number;
+  cost_cents: number;
+  gross_profit_cents: number;
+  quantity_sold: number;
+  movement_count: number;
+};
+
+export type AuditLog = {
+  id: string;
+  actor_id: string | null;
+  actor: User | null;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  metadata: Record<string, string>;
+  ip_address: string;
+  created_at: string;
+};
+
 export type BackupJob = {
   ID: string;
   StartedAt: string;

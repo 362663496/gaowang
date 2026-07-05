@@ -48,6 +48,8 @@ Buttons, inputs, selects, dialogs, tables, badges, tabs, empty states, loading s
 
 Buttons use icons when the action is a tool-like command. Text buttons are reserved for clear create, save, or submit actions. Focus states use an accent ring. Tables use row hover and compact status badges.
 
+Operational charts use compact bars and trend rows inside regular panels. They should share table density, use neutral rails with accent fills, and always include numeric labels so the chart is readable without interpreting color alone.
+
 ## 6. Motion
 
 Motion is functional only. Use 120ms for button feedback and 180-220ms for dialog or drawer transitions. Animate opacity and transform. Respect `prefers-reduced-motion`.

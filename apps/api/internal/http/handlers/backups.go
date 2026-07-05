@@ -39,12 +39,14 @@ func (h BackupHandler) Run(c *gin.Context) {
 		job.Status = models.BackupStatusFailed
 		job.ErrorMessage = err.Error()
 		_ = h.DB.Save(&job).Error
+		recordAudit(c, h.DB, "backup.run_failed", "backup", job.ID.String(), map[string]string{"status": string(job.Status)})
 		writeError(c, http.StatusInternalServerError, "BACKUP_FAILED", err.Error())
 		return
 	}
 	job.Status = models.BackupStatusSuccess
 	h.sendMail(ctx, &job)
 	_ = h.DB.Save(&job).Error
+	recordAudit(c, h.DB, "backup.run_succeeded", "backup", job.ID.String(), map[string]string{"status": string(job.Status), "email_status": job.EmailStatus})
 	c.JSON(http.StatusCreated, gin.H{"job": job})
 }
 

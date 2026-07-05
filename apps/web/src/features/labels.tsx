@@ -28,3 +28,40 @@ export function BackupStatusBadge({ status }: { status: BackupJob["Status"] }) {
   } as const;
   return <Badge tone={map[status].tone}>{map[status].label}</Badge>;
 }
+
+const auditActions: Record<string, string> = {
+  "auth.login_succeeded": "登录成功",
+  "auth.login_failed": "登录失败",
+  "auth.password_changed": "修改密码",
+  "product.create": "新增商品",
+  "shop.create": "新增店铺",
+  "inventory.inbound": "入库",
+  "inventory.sales_outbound": "销售出库",
+  "inventory.adjustment": "库存调整",
+  "user.create": "新增用户",
+  "backup.run_succeeded": "备份成功",
+  "backup.run_failed": "备份失败",
+  "settings.update": "设置修改",
+};
+
+const auditResources: Record<string, string> = {
+  auth: "认证",
+  backup: "备份",
+  product: "商品",
+  shop: "店铺",
+  setting: "设置",
+  user: "用户",
+};
+
+export function auditActionLabel(action: string): string {
+  return auditActions[action] ?? action;
+}
+
+export function auditResourceLabel(resource: string): string {
+  return auditResources[resource] ?? resource;
+}
+
+export function AuditActionBadge({ action }: { action: string }) {
+  const tone = action.endsWith("failed") ? "error" : action.startsWith("inventory.") ? "accent" : "neutral";
+  return <Badge tone={tone}>{auditActionLabel(action)}</Badge>;
+}

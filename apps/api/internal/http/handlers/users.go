@@ -72,5 +72,6 @@ func (h UserHandler) Create(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "USER_CREATE_FAILED", err.Error())
 		return
 	}
+	recordAudit(c, h.DB, "user.create", "user", user.ID.String(), map[string]string{"email": user.Email, "role": string(user.Role)})
 	c.JSON(http.StatusCreated, gin.H{"item": userResponse{ID: user.ID, Name: user.Name, Email: user.Email, Role: user.Role}})
 }

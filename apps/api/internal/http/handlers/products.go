@@ -49,6 +49,7 @@ func (h ProductHandler) Create(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "PRODUCT_CREATE_FAILED", err.Error())
 		return
 	}
+	recordAudit(c, h.DB, "product.create", "product", product.ID.String(), map[string]string{"code": product.Code, "name": product.Name})
 	c.JSON(http.StatusCreated, gin.H{"item": product})
 }
 

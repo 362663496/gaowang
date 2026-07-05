@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { Plus, Search } from "lucide-react";
+import { ImageIcon, Plus, Search } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -126,46 +126,72 @@ function ProductForm({ onCreated }: { onCreated: () => void }) {
 }
 
 function ProductsTable({ products }: { products: Product[] }) {
+  const [preview, setPreview] = useState<Product | null>(null);
   if (products.length === 0) {
     return <EmptyBlock title="还没有商品" />;
   }
   return (
-    <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-white">
-      <table className="w-full min-w-[860px] text-left text-sm">
-        <thead className="border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
-          <tr>
-            <th className="px-4 py-3 font-medium">商品</th>
-            <th className="px-4 py-3 font-medium">编码</th>
-            <th className="px-4 py-3 font-medium">进货价</th>
-            <th className="px-4 py-3 font-medium">销售价</th>
-            <th className="px-4 py-3 font-medium">低库存</th>
-            <th className="px-4 py-3 font-medium">状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          {products.map((product) => (
-            <tr className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-black/[0.02]" key={product.ID}>
-              <td className="px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black/[0.03] text-xs text-[var(--text-muted)]">
-                    {product.ImagePath ? <Image alt={`${product.Name} 图片`} className="h-full w-full object-cover" height={40} src={product.ImagePath} unoptimized width={40} /> : "图"}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{product.Name}</div>
-                    <div className="truncate text-xs text-[var(--text-secondary)]">{product.Note || "无备注"}</div>
-                  </div>
-                </div>
-              </td>
-              <td className="px-4 py-3 font-mono text-xs">{product.Code}</td>
-              <td className="px-4 py-3">{formatMoney(product.DefaultPurchaseCents)}</td>
-              <td className="px-4 py-3">{formatMoney(product.DefaultSaleCents)}</td>
-              <td className="px-4 py-3">{formatQuantity(product.LowStockThreshold)}</td>
-              <td className="px-4 py-3">{product.Enabled ? "启用" : "禁用"}</td>
+    <>
+      <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-white">
+        <table className="w-full min-w-[860px] text-left text-sm">
+          <thead className="border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
+            <tr>
+              <th className="px-4 py-3 font-medium">商品</th>
+              <th className="px-4 py-3 font-medium">编码</th>
+              <th className="px-4 py-3 font-medium">进货价</th>
+              <th className="px-4 py-3 font-medium">销售价</th>
+              <th className="px-4 py-3 font-medium">低库存</th>
+              <th className="px-4 py-3 font-medium">状态</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {products.map((product) => (
+              <tr className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-black/[0.02]" key={product.ID}>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <ProductThumb product={product} onPreview={() => setPreview(product)} />
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{product.Name}</div>
+                      <div className="truncate text-xs text-[var(--text-secondary)]">{product.Note || "无备注"}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 font-mono text-xs">{product.Code}</td>
+                <td className="px-4 py-3">{formatMoney(product.DefaultPurchaseCents)}</td>
+                <td className="px-4 py-3">{formatMoney(product.DefaultSaleCents)}</td>
+                <td className="px-4 py-3">{formatQuantity(product.LowStockThreshold)}</td>
+                <td className="px-4 py-3">{product.Enabled ? "启用" : "禁用"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Dialog open={preview !== null} onOpenChange={(openValue) => !openValue && setPreview(null)}>
+        <DialogContent title={preview ? preview.Name : "商品图片"}>
+          {preview?.ImagePath ? (
+            <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-black/[0.03]">
+              <Image alt={`${preview.Name} 图片预览`} className="max-h-[70dvh] w-full object-contain" height={900} src={preview.ImagePath} unoptimized width={1200} />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function ProductThumb({ product, onPreview }: { product: Product; onPreview: () => void }) {
+  const baseClass = "grid h-10 w-10 place-items-center overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black/[0.03] text-xs text-[var(--text-muted)]";
+  if (!product.ImagePath) {
+    return (
+      <div className={baseClass} aria-label="无商品图片">
+        <ImageIcon className="h-4 w-4" />
+      </div>
+    );
+  }
+  return (
+    <button className={`${baseClass} transition hover:border-[var(--accent-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]`} type="button" aria-label={`预览 ${product.Name} 图片`} onClick={onPreview}>
+      <Image alt={`${product.Name} 图片`} className="h-full w-full object-cover" height={40} src={product.ImagePath} unoptimized width={40} />
+    </button>
   );
 }
 

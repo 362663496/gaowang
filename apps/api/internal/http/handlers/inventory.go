@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"gaowang/apps/api/internal/models"
 	"gaowang/apps/api/internal/services"
@@ -56,7 +57,9 @@ func (h InventoryHandler) CreateInbound(c *gin.Context) {
 	err := services.InventoryService{DB: h.DB}.CreateInbound(services.InboundInput{
 		ProductID: productID, Quantity: req.Quantity, UnitCents: *req.UnitCents, OperatorID: currentUserID(c),
 	})
-	writeStockResult(c, err)
+	if writeStockResult(c, err) {
+		recordAudit(c, h.DB, "inventory.inbound", "product", productID.String(), map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10)})
+	}
 }
 
 func (h InventoryHandler) CreateSalesOutbound(c *gin.Context) {
@@ -75,7 +78,9 @@ func (h InventoryHandler) CreateSalesOutbound(c *gin.Context) {
 	err := services.InventoryService{DB: h.DB}.CreateSalesOutbound(services.OutboundInput{
 		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, SaleUnitCents: *req.SaleUnitCents, OperatorID: currentUserID(c),
 	})
-	writeStockResult(c, err)
+	if writeStockResult(c, err) {
+		recordAudit(c, h.DB, "inventory.sales_outbound", "product", productID.String(), map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10), "shop_id": shopID.String()})
+	}
 }
 
 func (r *outboundRequest) UnmarshalJSON(data []byte) error {
@@ -111,7 +116,9 @@ func (h InventoryHandler) CreateAdjustment(c *gin.Context) {
 	err := services.InventoryService{DB: h.DB}.CreateAdjustment(services.AdjustmentInput{
 		ProductID: productID, QuantityDelta: req.QuantityDelta, Reason: req.Reason, OperatorID: currentUserID(c),
 	})
-	writeStockResult(c, err)
+	if writeStockResult(c, err) {
+		recordAudit(c, h.DB, "inventory.adjustment", "product", productID.String(), map[string]string{"quantity_delta": strconv.FormatInt(req.QuantityDelta, 10), "reason": req.Reason})
+	}
 }
 
 func parseUUID(c *gin.Context, raw string, field string) (uuid.UUID, bool) {
@@ -123,14 +130,15 @@ func parseUUID(c *gin.Context, raw string, field string) (uuid.UUID, bool) {
 	return id, true
 }
 
-func writeStockResult(c *gin.Context, err error) {
+func writeStockResult(c *gin.Context, err error) bool {
 	if err == nil {
 		c.JSON(http.StatusCreated, gin.H{"ok": true})
-		return
+		return true
 	}
 	if errors.Is(err, services.ErrInsufficientStock) {
 		writeError(c, http.StatusConflict, "INSUFFICIENT_STOCK", err.Error())
-		return
+		return false
 	}
 	writeError(c, http.StatusBadRequest, "STOCK_OPERATION_FAILED", err.Error())
+	return false
 }

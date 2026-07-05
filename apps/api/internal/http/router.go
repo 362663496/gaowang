@@ -51,12 +51,16 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 	group.POST("/inventory/adjustments", inventoryHandler.CreateAdjustment)
 	group.GET("/stock-movements", movementHandler.List)
 	group.GET("/reports/sales-summary", reportHandler.SalesSummary)
+	group.GET("/reports/sales-trend", reportHandler.SalesTrend)
+	group.GET("/reports/product-ranking", reportHandler.ProductRanking)
+	group.GET("/reports/shop-ranking", reportHandler.ShopRanking)
 }
 
 func mountAdmin(group *gin.RouterGroup, cfg config.Config, database *gorm.DB) {
 	userHandler := handlers.UserHandler{DB: database}
 	backupHandler := handlers.BackupHandler{DB: database, Cfg: cfg}
 	settingHandler := handlers.SettingHandler{DB: database, Cfg: cfg}
+	auditHandler := handlers.AuditHandler{DB: database}
 
 	group.GET("/users", userHandler.List)
 	group.POST("/users", userHandler.Create)
@@ -64,4 +68,5 @@ func mountAdmin(group *gin.RouterGroup, cfg config.Config, database *gorm.DB) {
 	group.POST("/backups/run", backupHandler.Run)
 	group.GET("/settings", settingHandler.Get)
 	group.POST("/settings", settingHandler.Update)
+	group.GET("/audit-logs", auditHandler.List)
 }

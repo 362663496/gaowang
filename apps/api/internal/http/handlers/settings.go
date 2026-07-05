@@ -37,6 +37,7 @@ func (h SettingHandler) Update(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to save settings")
 		return
 	}
+	recordAudit(c, h.DB, "settings.update", "setting", setting.Key, map[string]string{"key": setting.Key})
 	c.JSON(http.StatusOK, gin.H{"settings": appSettingsResponse{BackupEmailRecipient: setting.Value}})
 }
 
