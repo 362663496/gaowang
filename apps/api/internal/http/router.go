@@ -43,6 +43,8 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 	group.POST("/auth/password", authHandler.ChangePassword)
 	group.GET("/products", productHandler.List)
 	group.POST("/products", productHandler.Create)
+	group.PATCH("/products/:id/enabled", productHandler.SetEnabled)
+	group.DELETE("/products/:id", productHandler.Delete)
 	group.GET("/shops", shopHandler.List)
 	group.POST("/shops", shopHandler.Create)
 	group.GET("/inventory", inventoryHandler.ListCurrent)

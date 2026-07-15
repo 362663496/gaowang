@@ -2,8 +2,9 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { ImageIcon, Plus, Search } from "lucide-react";
+import { ImageIcon, Plus, Power, Search, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/fields";
@@ -11,20 +12,25 @@ import { MessageBar } from "@/components/ui/message";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
 import type { Product } from "@/features/types";
 import { useMessage } from "@/features/use-message";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, request } from "@/lib/api";
 import { formatMoney, formatQuantity, yuanToCents } from "@/lib/format";
+
+type ProductAction = { productID: string; type: "status" | "delete" } | null;
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [busyAction, setBusyAction] = useState<ProductAction>(null);
   const { message, show } = useMessage();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    setActionError("");
     try {
       const data = await apiGet<{ items: Product[] }>(`/products${query ? `?q=${encodeURIComponent(query)}` : ""}`);
       setProducts(data.items);
@@ -40,6 +46,41 @@ export default function ProductsPage() {
   }, [load]);
 
   const totalValue = useMemo(() => products.reduce((sum, item) => sum + item.DefaultSaleCents, 0), [products]);
+
+  async function setProductEnabled(product: Product) {
+    setBusyAction({ productID: product.ID, type: "status" });
+    setActionError("");
+    try {
+      const data = await request<{ item: Product }>(`/products/${product.ID}/enabled`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !product.Enabled }),
+      });
+      setProducts((current) => current.map((item) => item.ID === product.ID ? data.item : item));
+      show(data.item.Enabled ? "商品已启用" : "商品已禁用");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "更新商品状态失败");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function deleteProduct(product: Product) {
+    if (!window.confirm(`确定删除商品“${product.Name}”吗？此操作无法撤销。`)) {
+      return;
+    }
+    setBusyAction({ productID: product.ID, type: "delete" });
+    setActionError("");
+    try {
+      await request<void>(`/products/${product.ID}`, { method: "DELETE" });
+      setProducts((current) => current.filter((item) => item.ID !== product.ID));
+      show("商品已删除");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "删除商品失败");
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -75,7 +116,10 @@ export default function ProductsPage() {
         <Input className="border-0 shadow-none focus:ring-0" placeholder="搜索商品名称或编码" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
 
-      {loading ? <LoadingBlock label="加载商品" /> : error ? <ErrorBlock message={error} onRetry={load} /> : <ProductsTable products={products} />}
+      {actionError ? <ErrorBlock message={actionError} /> : null}
+      {loading ? <LoadingBlock label="加载商品" /> : error ? <ErrorBlock message={error} onRetry={load} /> : (
+        <ProductsTable busyAction={busyAction} onDelete={deleteProduct} onSetEnabled={setProductEnabled} products={products} />
+      )}
       <MessageBar message={message} />
     </div>
   );
@@ -125,7 +169,12 @@ function ProductForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-function ProductsTable({ products }: { products: Product[] }) {
+function ProductsTable({ busyAction, onDelete, onSetEnabled, products }: {
+  busyAction: ProductAction;
+  onDelete: (product: Product) => void;
+  onSetEnabled: (product: Product) => void;
+  products: Product[];
+}) {
   const [preview, setPreview] = useState<Product | null>(null);
   if (products.length === 0) {
     return <EmptyBlock title="还没有商品" />;
@@ -133,7 +182,7 @@ function ProductsTable({ products }: { products: Product[] }) {
   return (
     <>
       <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-white">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[1020px] text-left text-sm">
           <thead className="border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
             <tr>
               <th className="px-4 py-3 font-medium">商品</th>
@@ -142,6 +191,7 @@ function ProductsTable({ products }: { products: Product[] }) {
               <th className="px-4 py-3 font-medium">销售价</th>
               <th className="px-4 py-3 font-medium">低库存</th>
               <th className="px-4 py-3 font-medium">状态</th>
+              <th className="px-4 py-3 font-medium">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -160,7 +210,32 @@ function ProductsTable({ products }: { products: Product[] }) {
                 <td className="px-4 py-3">{formatMoney(product.DefaultPurchaseCents)}</td>
                 <td className="px-4 py-3">{formatMoney(product.DefaultSaleCents)}</td>
                 <td className="px-4 py-3">{formatQuantity(product.LowStockThreshold)}</td>
-                <td className="px-4 py-3">{product.Enabled ? "启用" : "禁用"}</td>
+                <td className="px-4 py-3"><Badge tone={product.Enabled ? "success" : "error"}>{product.Enabled ? "启用" : "禁用"}</Badge></td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-1">
+                    <Button
+                      disabled={busyAction !== null}
+                      loading={busyAction?.productID === product.ID && busyAction.type === "status"}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                      onClick={() => onSetEnabled(product)}
+                    >
+                      <Power className="h-3.5 w-3.5" />{product.Enabled ? "禁用" : "启用"}
+                    </Button>
+                    <Button
+                      className="text-[var(--status-error)] hover:text-[var(--status-error)]"
+                      disabled={busyAction !== null}
+                      loading={busyAction?.productID === product.ID && busyAction.type === "delete"}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => onDelete(product)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />删除
+                    </Button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import { ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { MessageBar } from "@/components/ui/message";
@@ -91,8 +93,19 @@ function InventoryTable({ inventory }: { inventory: InventorySnapshot[] }) {
           {inventory.map((item) => (
             <tr className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-black/[0.02]" key={item.ProductID}>
               <td className="px-4 py-3">
-                <div className="font-medium">{item.Product.Name}</div>
-                <div className="font-mono text-xs text-[var(--text-secondary)]">{item.Product.Code}</div>
+                <div className="flex items-center gap-3">
+                  {item.Product.ImagePath ? (
+                    <Image alt={`${item.Product.Name} 图片`} className="h-10 w-10 shrink-0 rounded-md border border-[var(--border-subtle)] object-cover" height={40} src={item.Product.ImagePath} unoptimized width={40} />
+                  ) : (
+                    <div aria-label="无商品图片" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[var(--border-subtle)] bg-black/[0.03] text-[var(--text-muted)]">
+                      <ImageIcon className="h-4 w-4" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{item.Product.Name}</div>
+                    <div className="truncate font-mono text-xs text-[var(--text-secondary)]">{item.Product.Code}</div>
+                  </div>
+                </div>
               </td>
               <td className="px-4 py-3"><Badge>{formatQuantity(item.Quantity)}</Badge></td>
               <td className="px-4 py-3">{formatMoney(item.MovingAverageCostCents)}</td>
