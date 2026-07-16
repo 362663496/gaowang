@@ -9,16 +9,17 @@ apps/web/src/
 │   ├── login/page.tsx          # public login route
 │   └── (app)/                  # routes wrapped by the authenticated shell
 ├── components/
-│   ├── layout/                 # app shell and page header
-│   └── ui/                     # reusable buttons, fields, dialog, badges, states
+│   └── layout/                 # AntD provider, app shell, page header, page feedback
 ├── features/
 │   ├── inventory/              # inventory-specific forms
 │   ├── users/                  # testable user form operations
 │   ├── labels.tsx              # shared domain labels/badges
+│   ├── pagination.ts           # server PaginationMeta → AntD Table adapter
+│   ├── product-combobox.tsx    # shared searchable AntD product Select
+│   ├── product-image.tsx       # shared AntD image/fallback behavior
 │   ├── types.ts                # cross-page API/domain response types
-│   └── use-message.ts          # shared transient message hook
-├── lib/                        # API/session, formatting, and class-name helpers
-└── styles/globals.css          # Tailwind import and design tokens
+├── lib/                        # API/session and formatting helpers
+└── styles/globals.css          # design tokens and framework-gap layout CSS
 ```
 
 Tests are collocated with the TypeScript module they exercise as `*.test.ts`.
@@ -26,9 +27,9 @@ Tests are collocated with the TypeScript module they exercise as `*.test.ts`.
 ## Placement Rules
 
 - A route's data loading, filters, and one-off view pieces stay in its `app/**/page.tsx` while they have one owner. `products/page.tsx` and `reports/page.tsx` are the local pattern.
-- Move UI reused across routes into `components/ui` (generic primitives) or `components/layout` (shell/page framing).
+- Use Ant Design directly for generic controls and feedback. Move only shell/page framing into `components/layout`; do not build a second generic `components/ui` layer.
 - Move domain behavior reused by a page or worth testing without rendering into `features/<domain>`. Existing examples are inventory action forms and user submit helpers.
-- Keep transport/session logic in `lib/api.ts`; keep locale-aware display/input conversion in `lib/format.ts`; use `lib/utils.ts` only for the shared `cn` class merger.
+- Keep transport/session logic in `lib/api.ts`; keep locale-aware display/input conversion in `lib/format.ts`.
 - Put response types shared by multiple views in `features/types.ts`. Keep a truly local response row or prop type beside its consumer.
 - Keep route groups structural: `(app)` supplies `AppShell` without changing URLs.
 

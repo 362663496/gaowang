@@ -31,7 +31,7 @@ No schema-validation library is installed. Runtime checks are narrow and local:
 
 - `readDevSession` catches invalid JSON and narrows `userId`/`role` before use.
 - `readError` accepts missing error fields and supplies stable fallbacks.
-- Forms rely on native HTML constraints plus explicit string/number conversion; the Go API performs authoritative validation.
+- Forms use typed Ant Design `Form` values and rules plus explicit string/number conversion; the Go API performs authoritative validation.
 - `ApiError` carries `code`, `message`, and HTTP `status`; UI code normally displays `Error.message`.
 
 Add a runtime validator only for an actually untrusted/complex contract that cannot be checked with a few explicit conditions.

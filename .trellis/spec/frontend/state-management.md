@@ -22,7 +22,7 @@ References: `src/lib/api.ts`, `src/lib/api.test.ts`, and `src/components/layout/
 ## Server Data And Mutations
 
 - Treat the backend as source of truth. Do not optimistically patch inventory, financial, backup, or audit state.
-- After a create/update succeeds, close the form, show a success message, and call the existing page loader.
+- After a create/update succeeds, close the form, show an `App.useApp().message` success message, and call the existing page loader.
 - Keep independent screen requests concurrent with `Promise.all` but commit each response to its own typed state.
 - Preserve explicit loading, error, and empty states rather than encoding them in a single loosely typed object.
 

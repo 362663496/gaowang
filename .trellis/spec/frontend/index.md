@@ -1,6 +1,6 @@
 # Frontend Development Guidelines
 
-These guides describe the Next.js app in `apps/web`: App Router pages, strict TypeScript, Tailwind CSS v4, local UI primitives, direct API calls, and page-local state.
+These guides describe the Next.js app in `apps/web`: App Router pages, strict TypeScript, Ant Design 6, direct API calls, and page-local state.
 
 ## Guides
 
@@ -12,13 +12,14 @@ These guides describe the Next.js app in `apps/web`: App Router pages, strict Ty
 | [State Management](./state-management.md) | Local, server-derived, session, and filter state |
 | [Type Safety](./type-safety.md) | API contracts, strict TypeScript, and boundary conversion |
 | [Quality Guidelines](./quality-guidelines.md) | Lint, type-check, tests, build, and review checks |
+| [Ant Design Platform](./antd-platform.md) | Provider, layout, tables, forms, search selects, feedback, and UI error contracts |
 
 ## Pre-Development Checklist
 
 1. Always read [Directory Structure](./directory-structure.md), [Component Guidelines](./component-guidelines.md), and [Quality Guidelines](./quality-guidelines.md).
 2. Read [Hook Guidelines](./hook-guidelines.md) and [State Management](./state-management.md) before changing client loading, filters, forms, or shared browser state.
 3. Read [Type Safety](./type-safety.md) before changing API payloads, shared feature types, money fields, or session behavior.
-4. For visual changes, follow root `DESIGN.md` and reuse `src/components/ui` primitives and CSS variables from `src/styles/globals.css`.
+4. For visual changes, read [Ant Design Platform](./antd-platform.md), follow root `DESIGN.md`, and use Ant Design components plus the tokens in `src/styles/globals.css`.
 5. Keep frontend contracts aligned with the Go handlers/models in `apps/api`.
 
 ## Baseline Verification
