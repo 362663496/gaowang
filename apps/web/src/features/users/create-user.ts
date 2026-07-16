@@ -1,17 +1,19 @@
-import type { FormEvent } from "react";
 import type { User } from "../types";
 import { apiPost } from "../../lib/api";
 
-export async function submitCreateUser(event: FormEvent<HTMLFormElement>): Promise<User> {
-  event.preventDefault();
-  const formElement = event.currentTarget;
-  const form = new FormData(formElement);
+export type CreateUserInput = {
+  name: string;
+  email: string;
+  password: string;
+  role: "admin" | "staff";
+};
+
+export async function createUser(input: CreateUserInput): Promise<User> {
   const data = await apiPost<{ item: User }>("/users", {
-    name: String(form.get("name") ?? ""),
-    email: String(form.get("email") ?? ""),
-    password: String(form.get("password") ?? ""),
-    role: String(form.get("role") ?? "staff"),
+    name: input.name,
+    email: input.email,
+    password: input.password,
+    role: input.role,
   });
-  formElement.reset();
   return data.item;
 }

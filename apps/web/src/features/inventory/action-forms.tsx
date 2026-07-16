@@ -1,11 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, SlidersHorizontal } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
-import { Field, Input, Select, Textarea } from "@/components/ui/fields";
-import { ErrorBlock } from "@/components/ui/state";
+import { ExportOutlined, ImportOutlined, SlidersOutlined } from "@ant-design/icons";
+import { Alert, Button, Flex, Form, Input, InputNumber, Modal, Select, Space } from "antd";
+import { useMemo, useState } from "react";
 import { ProductCombobox } from "@/features/product-combobox";
 import type { InventorySnapshot, Product, Shop } from "@/features/types";
 import { apiPost } from "@/lib/api";
@@ -18,43 +15,36 @@ type Props = {
   onDone: (message: string) => void;
 };
 
+type InboundValues = { product_id: string; shop_id?: string; quantity: number; unit_yuan: number };
+type OutboundValues = { product_id: string; shop_id: string; quantity: number; sale_yuan: number };
+type AdjustmentValues = { product_id: string; quantity_delta: number; reason: string };
+
 export function InventoryActions({ products, shops, inventory, onDone }: Props) {
   return (
-    <>
+    <Space wrap>
       <InboundForm products={products} shops={shops} onDone={onDone} />
       <OutboundForm inventory={inventory} products={products} shops={shops} onDone={onDone} />
-      <AdjustmentForm inventory={inventory} products={products} onDone={onDone} />
-    </>
+      <AdjustmentForm products={products} onDone={onDone} />
+    </Space>
   );
 }
 
 function InboundForm({ products, shops, onDone }: Pick<Props, "products" | "shops" | "onDone">) {
+  const [form] = Form.useForm<InboundValues>();
   const [open, setOpen] = useState(false);
-  const [productID, setProductID] = useState("");
-  const [unitYuan, setUnitYuan] = useState("0.00");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const product = products.find((item) => item.ID === productID);
+  const selectableProducts = useSelectableProducts(products);
 
-  useEffect(() => {
-    setUnitYuan(centsToYuanInput(product?.DefaultPurchaseCents ?? 0));
-  }, [product]);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!productID) {
-      setError("请选择有效商品");
-      return;
-    }
+  async function submit(values: InboundValues) {
     setSaving(true);
     setError("");
-    const form = new FormData(event.currentTarget);
     try {
       await apiPost("/inventory/inbound", {
-        product_id: productID,
-        shop_id: String(form.get("shop_id") ?? ""),
-        quantity: Number(form.get("quantity")),
-        unit_cents: yuanToCents(String(form.get("unit_yuan") ?? "")),
+        product_id: values.product_id,
+        shop_id: values.shop_id ?? "",
+        quantity: values.quantity,
+        unit_cents: yuanToCents(String(values.unit_yuan ?? 0)),
       });
       setOpen(false);
       onDone("入库已记录");
@@ -66,59 +56,78 @@ function InboundForm({ products, shops, onDone }: Pick<Props, "products" | "shop
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button><ArrowDownToLine className="h-4 w-4" />入库</Button></DialogTrigger>
-      <DialogContent title="新建入库">
-        <form className="grid gap-4" onSubmit={submit}>
-          {error ? <ErrorBlock message={error} /> : null}
-          <ProductSelect products={products} value={productID} onChange={setProductID} />
-          <Field label="店铺（可选）">
-            <Select defaultValue="" name="shop_id">
-              <option value="">不选择店铺</option>
-              {shops.map((shop) => <option key={shop.ID} value={shop.ID}>{shop.Name}</option>)}
-            </Select>
-          </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="数量"><Input min="1" name="quantity" required type="number" /></Field>
-            <Field label="进货单价（元）"><Input min="0" name="unit_yuan" required step="0.01" type="number" value={unitYuan} onChange={(event) => setUnitYuan(event.target.value)} /></Field>
-          </div>
-          <Actions saving={saving} label="保存入库" />
-        </form>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Button icon={<ImportOutlined />} type="primary" onClick={() => setOpen(true)}>入库</Button>
+      <Modal
+        destroyOnHidden
+        footer={null}
+        open={open}
+        title="新建入库"
+        onCancel={() => setOpen(false)}
+        afterClose={() => { form.resetFields(); setError(""); }}
+      >
+        <Form<InboundValues>
+          form={form}
+          initialValues={{ quantity: 1, unit_yuan: 0 }}
+          layout="vertical"
+          requiredMark={false}
+          onFinish={submit}
+          onValuesChange={(changed) => {
+            if ("product_id" in changed) {
+              const product = products.find((item) => item.ID === changed.product_id);
+              form.setFieldValue("unit_yuan", Number(centsToYuanInput(product?.DefaultPurchaseCents ?? 0)));
+            }
+          }}
+        >
+          {error ? <Alert message={error} showIcon style={{ marginBottom: 16 }} type="error" /> : null}
+          <Form.Item label="商品" name="product_id" rules={[{ required: true, message: "请选择商品" }]}>
+            <ProductCombobox products={selectableProducts} />
+          </Form.Item>
+          <Form.Item label="店铺（可选）" name="shop_id">
+            <Select
+              allowClear
+              notFoundContent="没有店铺"
+              options={shops.map((shop) => ({ value: shop.ID, label: shop.Name }))}
+              placeholder="不选择店铺"
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+          <Flex gap={14} wrap>
+            <Form.Item label="数量" name="quantity" rules={[{ required: true, message: "请输入数量" }]} style={{ flex: 1, minWidth: 180 }}>
+              <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item label="进货单价（元）" name="unit_yuan" rules={[{ required: true, message: "请输入进货单价" }]} style={{ flex: 1, minWidth: 180 }}>
+              <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+            </Form.Item>
+          </Flex>
+          <FormActions label="保存入库" saving={saving} onCancel={() => setOpen(false)} />
+        </Form>
+      </Modal>
+    </>
   );
 }
 
 function OutboundForm({ products, shops, inventory, onDone }: Props) {
+  const [form] = Form.useForm<OutboundValues>();
   const [open, setOpen] = useState(false);
-  const [productID, setProductID] = useState("");
-  const [saleYuan, setSaleYuan] = useState("0.00");
-  const [quantity, setQuantity] = useState(1);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const product = products.find((item) => item.ID === productID);
+  const selectableProducts = useSelectableProducts(products);
+  const productID = Form.useWatch("product_id", form);
+  const quantity = Form.useWatch("quantity", form) ?? 1;
   const stock = inventory.find((item) => item.ProductID === productID)?.Quantity ?? 0;
-  const shortage = quantity > stock;
+  const shortage = Boolean(productID) && quantity > stock;
 
-  useEffect(() => {
-    setSaleYuan(centsToYuanInput(product?.DefaultSaleCents ?? 0));
-  }, [product]);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!productID) {
-      setError("请选择有效商品");
-      return;
-    }
+  async function submit(values: OutboundValues) {
     setSaving(true);
     setError("");
-    const form = new FormData(event.currentTarget);
     try {
       await apiPost("/inventory/sales-outbound", {
-        product_id: productID,
-        shop_id: String(form.get("shop_id") ?? ""),
-        quantity,
-        sale_unit_cents: yuanToCents(String(form.get("sale_yuan") ?? "")),
+        product_id: values.product_id,
+        shop_id: values.shop_id,
+        quantity: values.quantity,
+        sale_unit_cents: yuanToCents(String(values.sale_yuan ?? 0)),
       });
       setOpen(false);
       onDone("销售出库已记录");
@@ -130,51 +139,73 @@ function OutboundForm({ products, shops, inventory, onDone }: Props) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button variant="secondary"><ArrowUpFromLine className="h-4 w-4" />销售出库</Button></DialogTrigger>
-      <DialogContent title="销售出库">
-        <form className="grid gap-4" onSubmit={submit}>
-          {error ? <ErrorBlock message={error} /> : null}
-          <ProductSelect products={products} value={productID} onChange={setProductID} />
-          <Field label="店铺">
-            <Select name="shop_id" required>
-              {shops.map((shop) => <option key={shop.ID} value={shop.ID}>{shop.Name}</option>)}
-            </Select>
-          </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={`数量（当前 ${formatQuantity(stock)}）`}>
-              <Input min="1" name="quantity" required type="number" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} />
-            </Field>
-            <Field label="销售单价（元）"><Input min="0" name="sale_yuan" required step="0.01" type="number" value={saleYuan} onChange={(event) => setSaleYuan(event.target.value)} /></Field>
-          </div>
-          {shortage ? <div className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">当前库存不足，提交会被后端拒绝。</div> : null}
-          <Actions saving={saving} label="保存出库" />
-        </form>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Button icon={<ExportOutlined />} onClick={() => setOpen(true)}>销售出库</Button>
+      <Modal
+        destroyOnHidden
+        footer={null}
+        open={open}
+        title="销售出库"
+        onCancel={() => setOpen(false)}
+        afterClose={() => { form.resetFields(); setError(""); }}
+      >
+        <Form<OutboundValues>
+          form={form}
+          initialValues={{ quantity: 1, sale_yuan: 0 }}
+          layout="vertical"
+          requiredMark={false}
+          onFinish={submit}
+          onValuesChange={(changed) => {
+            if ("product_id" in changed) {
+              const product = products.find((item) => item.ID === changed.product_id);
+              form.setFieldValue("sale_yuan", Number(centsToYuanInput(product?.DefaultSaleCents ?? 0)));
+            }
+          }}
+        >
+          {error ? <Alert message={error} showIcon style={{ marginBottom: 16 }} type="error" /> : null}
+          <Form.Item label="商品" name="product_id" rules={[{ required: true, message: "请选择商品" }]}>
+            <ProductCombobox products={selectableProducts} />
+          </Form.Item>
+          <Form.Item label="店铺" name="shop_id" rules={[{ required: true, message: "请选择店铺" }]}>
+            <Select
+              notFoundContent="没有店铺"
+              options={shops.map((shop) => ({ value: shop.ID, label: shop.Name }))}
+              placeholder="选择店铺"
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+          <Flex gap={14} wrap>
+            <Form.Item label={`数量（当前 ${formatQuantity(stock)}）`} name="quantity" rules={[{ required: true, message: "请输入数量" }]} style={{ flex: 1, minWidth: 180 }}>
+              <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item label="销售单价（元）" name="sale_yuan" rules={[{ required: true, message: "请输入销售单价" }]} style={{ flex: 1, minWidth: 180 }}>
+              <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+            </Form.Item>
+          </Flex>
+          {shortage ? <Alert message="当前库存不足，提交会被服务端拒绝。" showIcon style={{ marginBottom: 16 }} type="warning" /> : null}
+          <FormActions label="保存出库" saving={saving} onCancel={() => setOpen(false)} />
+        </Form>
+      </Modal>
+    </>
   );
 }
 
-function AdjustmentForm({ products, onDone }: Pick<Props, "products" | "inventory" | "onDone">) {
+function AdjustmentForm({ products, onDone }: Pick<Props, "products" | "onDone">) {
+  const [form] = Form.useForm<AdjustmentValues>();
   const [open, setOpen] = useState(false);
-  const [productID, setProductID] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const selectableProducts = useSelectableProducts(products);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!productID) {
-      setError("请选择有效商品");
-      return;
-    }
+  async function submit(values: AdjustmentValues) {
     setSaving(true);
     setError("");
-    const form = new FormData(event.currentTarget);
     try {
       await apiPost("/inventory/adjustments", {
-        product_id: productID,
-        quantity_delta: Number(form.get("quantity_delta")),
-        reason: String(form.get("reason") ?? ""),
+        product_id: values.product_id,
+        quantity_delta: values.quantity_delta,
+        reason: values.reason,
       });
       setOpen(false);
       onDone("库存调整已记录");
@@ -186,31 +217,43 @@ function AdjustmentForm({ products, onDone }: Pick<Props, "products" | "inventor
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button variant="secondary"><SlidersHorizontal className="h-4 w-4" />调整</Button></DialogTrigger>
-      <DialogContent title="库存调整">
-        <form className="grid gap-4" onSubmit={submit}>
-          {error ? <ErrorBlock message={error} /> : null}
-          <ProductSelect products={products} value={productID} onChange={setProductID} />
-          <Field label="调整数量"><Input name="quantity_delta" required type="number" placeholder="正数增加，负数减少" /></Field>
-          <Field label="原因"><Textarea maxLength={500} name="reason" required /></Field>
-          <Actions saving={saving} label="保存调整" />
-        </form>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Button icon={<SlidersOutlined />} onClick={() => setOpen(true)}>调整</Button>
+      <Modal
+        destroyOnHidden
+        footer={null}
+        open={open}
+        title="库存调整"
+        onCancel={() => setOpen(false)}
+        afterClose={() => { form.resetFields(); setError(""); }}
+      >
+        <Form<AdjustmentValues> form={form} layout="vertical" requiredMark={false} onFinish={submit}>
+          {error ? <Alert message={error} showIcon style={{ marginBottom: 16 }} type="error" /> : null}
+          <Form.Item label="商品" name="product_id" rules={[{ required: true, message: "请选择商品" }]}>
+            <ProductCombobox products={selectableProducts} />
+          </Form.Item>
+          <Form.Item label="调整数量" name="quantity_delta" rules={[{ required: true, message: "请输入调整数量" }]} extra="正数增加，负数减少">
+            <InputNumber precision={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item label="原因" name="reason" rules={[{ required: true, message: "请输入调整原因" }]}>
+            <Input.TextArea maxLength={500} rows={3} showCount />
+          </Form.Item>
+          <FormActions label="保存调整" saving={saving} onCancel={() => setOpen(false)} />
+        </Form>
+      </Modal>
+    </>
   );
 }
 
-function ProductSelect({ products, value, onChange }: { products: Product[]; value: string; onChange: (id: string) => void }) {
-  const enabledProducts = useMemo(() => products.filter((product) => product.Enabled && !product.ArchivedAt), [products]);
-  return <ProductCombobox products={enabledProducts} required value={value} onChange={onChange} />;
+function useSelectableProducts(products: Product[]) {
+  return useMemo(() => products.filter((product) => product.Enabled && !product.ArchivedAt), [products]);
 }
 
-function Actions({ saving, label }: { saving: boolean; label: string }) {
+function FormActions({ saving, label, onCancel }: { saving: boolean; label: string; onCancel: () => void }) {
   return (
-    <div className="flex justify-end gap-2">
-      <DialogClose asChild><Button type="button" variant="secondary">取消</Button></DialogClose>
-      <Button loading={saving} type="submit">{label}</Button>
-    </div>
+    <Flex gap={8} justify="flex-end">
+      <Button onClick={onCancel}>取消</Button>
+      <Button htmlType="submit" loading={saving} type="primary">{label}</Button>
+    </Flex>
   );
 }

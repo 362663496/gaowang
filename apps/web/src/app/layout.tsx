@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { AntdRegistry } from "@ant-design/nextjs-registry";
+import { AppProvider } from "@/components/layout/app-provider";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {
@@ -9,7 +11,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <AntdRegistry>
+          <AppProvider>{children}</AppProvider>
+        </AntdRegistry>
+      </body>
     </html>
   );
 }

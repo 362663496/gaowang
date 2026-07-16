@@ -1,9 +1,9 @@
 "use client";
 
+import { Card, Col, Flex, List, Progress, Row, Statistic, Table, Tag, type TableProps } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PageEmpty, PageError, PageLoading } from "@/components/layout/page-feedback";
 import { PageHeader } from "@/components/layout/page-header";
-import { Badge } from "@/components/ui/badge";
-import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
 import type { InventorySnapshot, ProductRankingRow, SalesSummary, SalesTrendRow, ShopRankingRow } from "@/features/types";
 import { apiGet } from "@/lib/api";
 import { formatMoney, formatQuantity } from "@/lib/format";
@@ -45,82 +45,97 @@ export default function ReportsPage() {
   }, [load]);
 
   const inventoryValue = useMemo(() => inventory.reduce((sum, item) => sum + item.InventoryValueCents, 0), [inventory]);
-  const lowStock = inventory.filter((item) => item.Product.LowStockThreshold > 0 && item.Quantity <= item.Product.LowStockThreshold);
+  const lowStock = useMemo(
+    () => inventory.filter((item) => item.Product.LowStockThreshold > 0 && item.Quantity <= item.Product.LowStockThreshold),
+    [inventory],
+  );
 
-  if (loading) return <LoadingBlock label="加载报表" />;
-  if (error) return <ErrorBlock message={error} onRetry={load} />;
-  if (!summary) return <EmptyBlock title="暂无报表" />;
+  if (loading) return <PageLoading label="加载报表" />;
+  if (error) return <PageError message={error} onRetry={() => void load()} />;
+  if (!summary) return <PageEmpty title="暂无报表" />;
+
+  const lowStockColumns: TableProps<InventorySnapshot>["columns"] = [
+    { title: "商品", dataIndex: ["Product", "Name"], render: (value: string) => <strong>{value}</strong> },
+    { title: "编码", dataIndex: ["Product", "Code"], render: (value: string) => <span className="mono">{value}</span> },
+    { title: "当前库存", dataIndex: "Quantity", render: formatQuantity },
+    { title: "阈值", dataIndex: ["Product", "LowStockThreshold"], render: formatQuantity },
+  ];
 
   return (
-    <div className="space-y-5">
-      <PageHeader title="报表" description="销售额、成本、毛利、库存金额和低库存概览。" />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric label="销售额" value={formatMoney(summary.revenue_cents)} />
-        <Metric label="销售成本" value={formatMoney(summary.cost_cents)} />
-        <Metric label="毛利" value={formatMoney(summary.gross_profit_cents)} />
-        <Metric label="库存金额" value={formatMoney(inventoryValue)} />
-        <Metric label="低库存品类" value={formatQuantity(lowStock.length)} />
-      </div>
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-        <TrendPanel rows={trend} />
-        <RankingPanel title="商品销售排行" rows={products.map((item) => ({ id: item.product_id, label: item.product_name, sublabel: item.product_code, archived: item.archived, revenue: item.revenue_cents, quantity: item.quantity_sold, gross: item.gross_profit_cents }))} />
-      </div>
-      <RankingPanel title="店铺销售排行" rows={shops.map((item) => ({ id: item.shop_id, label: item.shop_name, revenue: item.revenue_cents, quantity: item.quantity_sold, gross: item.gross_profit_cents }))} />
-      <section className="rounded-lg border border-[var(--border-subtle)] bg-white">
-        <div className="border-b border-[var(--border-subtle)] px-4 py-3 font-medium">低库存列表</div>
-        {lowStock.length === 0 ? (
-          <div className="p-4"><EmptyBlock title="没有低库存商品" /></div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
-                <tr><th className="px-4 py-3 font-medium">商品</th><th className="px-4 py-3 font-medium">编码</th><th className="px-4 py-3 font-medium">当前库存</th><th className="px-4 py-3 font-medium">阈值</th></tr>
-              </thead>
-              <tbody>
-                {lowStock.map((item) => (
-                  <tr className="border-b border-[var(--border-subtle)] last:border-0" key={item.ProductID}>
-                    <td className="px-4 py-3 font-medium">{item.Product.Name}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{item.Product.Code}</td>
-                    <td className="px-4 py-3">{formatQuantity(item.Quantity)}</td>
-                    <td className="px-4 py-3">{formatQuantity(item.Product.LowStockThreshold)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </div>
+    <Flex gap={20} vertical>
+      <PageHeader description="销售额、成本、毛利、库存金额和低库存概览。" title="报表" />
+      <Row gutter={[12, 12]}>
+        <Col lg={5} sm={12} xs={24}><Metric label="销售额" value={formatMoney(summary.revenue_cents)} /></Col>
+        <Col lg={5} sm={12} xs={24}><Metric label="销售成本" value={formatMoney(summary.cost_cents)} /></Col>
+        <Col lg={5} sm={12} xs={24}><Metric label="毛利" value={formatMoney(summary.gross_profit_cents)} /></Col>
+        <Col lg={5} sm={12} xs={24}><Metric label="库存金额" value={formatMoney(inventoryValue)} /></Col>
+        <Col lg={4} sm={12} xs={24}><Metric label="低库存品类" value={formatQuantity(lowStock.length)} /></Col>
+      </Row>
+      <Row gutter={[16, 16]}>
+        <Col xl={14} xs={24}><TrendPanel rows={trend} /></Col>
+        <Col xl={10} xs={24}>
+          <RankingPanel
+            rows={products.map((item) => ({
+              id: item.product_id,
+              label: item.product_name,
+              sublabel: item.product_code,
+              archived: item.archived,
+              revenue: item.revenue_cents,
+              quantity: item.quantity_sold,
+              gross: item.gross_profit_cents,
+            }))}
+            title="商品销售排行"
+          />
+        </Col>
+      </Row>
+      <RankingPanel
+        rows={shops.map((item) => ({
+          id: item.shop_id,
+          label: item.shop_name,
+          revenue: item.revenue_cents,
+          quantity: item.quantity_sold,
+          gross: item.gross_profit_cents,
+        }))}
+        title="店铺销售排行"
+      />
+      <Card className="table-card" title="低库存列表">
+        <Table<InventorySnapshot>
+          columns={lowStockColumns}
+          dataSource={lowStock}
+          pagination={false}
+          rowKey="ProductID"
+          scroll={{ x: 620 }}
+          size="small"
+        />
+      </Card>
+    </Flex>
   );
 }
 
 function TrendPanel({ rows }: { rows: SalesTrendRow[] }) {
   const maxRevenue = Math.max(...rows.map((row) => row.revenue_cents), 0);
   return (
-    <section className="rounded-lg border border-[var(--border-subtle)] bg-white">
-      <div className="border-b border-[var(--border-subtle)] px-4 py-3 font-medium">近 30 天销售趋势</div>
-      {rows.length === 0 ? (
-        <div className="p-4"><EmptyBlock title="暂无销售趋势" /></div>
-      ) : (
-        <div className="grid gap-3 p-4">
-          {rows.map((row) => (
-            <div className="grid gap-2" key={row.day}>
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="font-mono text-xs text-[var(--text-secondary)]">{row.day}</span>
-                <span className="font-medium">{formatMoney(row.revenue_cents)}</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-black/[0.05]">
-                <div className="h-full rounded-full bg-[var(--accent-primary)]" style={{ width: percent(row.revenue_cents, maxRevenue) }} />
-              </div>
-              <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
+    <Card title="近 30 天销售趋势">
+      <List<SalesTrendRow>
+        dataSource={rows}
+        locale={{ emptyText: "暂无销售趋势" }}
+        renderItem={(row) => (
+          <List.Item>
+            <Flex gap={7} style={{ width: "100%" }} vertical>
+              <Flex justify="space-between">
+                <span className="mono muted">{row.day}</span>
+                <strong>{formatMoney(row.revenue_cents)}</strong>
+              </Flex>
+              <Progress percent={percent(row.revenue_cents, maxRevenue)} showInfo={false} size="small" />
+              <Flex className="muted" justify="space-between">
                 <span>销量 {formatQuantity(row.quantity_sold)}</span>
                 <span>毛利 {formatMoney(row.gross_profit_cents)}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+              </Flex>
+            </Flex>
+          </List.Item>
+        )}
+      />
+    </Card>
   );
 }
 
@@ -137,51 +152,41 @@ type RankingItem = {
 function RankingPanel({ title, rows }: { title: string; rows: RankingItem[] }) {
   const maxRevenue = Math.max(...rows.map((row) => row.revenue), 0);
   return (
-    <section className="rounded-lg border border-[var(--border-subtle)] bg-white">
-      <div className="border-b border-[var(--border-subtle)] px-4 py-3 font-medium">{title}</div>
-      {rows.length === 0 ? (
-        <div className="p-4"><EmptyBlock title="暂无销售排行" /></div>
-      ) : (
-        <div className="divide-y divide-[var(--border-subtle)]">
-          {rows.map((row, index) => (
-            <div className="grid gap-2 px-4 py-3" key={row.id}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-medium">{index + 1}. {row.label}</span>
-                    {row.archived ? <Badge>已归档</Badge> : null}
-                  </div>
-                  {row.sublabel ? <div className="text-xs text-[var(--text-secondary)]">{row.sublabel}</div> : null}
+    <Card title={title}>
+      <List<RankingItem>
+        dataSource={rows}
+        locale={{ emptyText: "暂无销售排行" }}
+        renderItem={(row, index) => (
+          <List.Item>
+            <Flex gap={7} style={{ width: "100%" }} vertical>
+              <Flex align="flex-start" gap={12} justify="space-between">
+                <div>
+                  <Flex align="center" gap={6}>
+                    <strong>{index + 1}. {row.label}</strong>
+                    {row.archived ? <Tag>已归档</Tag> : null}
+                  </Flex>
+                  {row.sublabel ? <span className="mono muted">{row.sublabel}</span> : null}
                 </div>
-                <div className="shrink-0 text-right">
-                  <div className="font-medium">{formatMoney(row.revenue)}</div>
-                  <div className="text-xs text-[var(--text-secondary)]">销量 {formatQuantity(row.quantity)}</div>
+                <div style={{ textAlign: "right" }}>
+                  <strong>{formatMoney(row.revenue)}</strong>
+                  <div className="muted">销量 {formatQuantity(row.quantity)}</div>
                 </div>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-black/[0.05]">
-                <div className="h-full rounded-full bg-[var(--accent-primary)]" style={{ width: percent(row.revenue, maxRevenue) }} />
-              </div>
-              <div className="text-xs text-[var(--text-secondary)]">毛利 {formatMoney(row.gross)}</div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+              </Flex>
+              <Progress percent={percent(row.revenue, maxRevenue)} showInfo={false} size="small" />
+              <span className="muted">毛利 {formatMoney(row.gross)}</span>
+            </Flex>
+          </List.Item>
+        )}
+      />
+    </Card>
   );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <section className="rounded-lg border border-[var(--border-subtle)] bg-white p-4">
-      <div className="text-xs text-[var(--text-secondary)]">{label}</div>
-      <div className="mt-2 text-xl font-semibold">{value}</div>
-    </section>
-  );
+  return <Card className="metric-card"><Statistic title={label} value={value} /></Card>;
 }
 
-function percent(value: number, max: number): string {
-  if (max <= 0) {
-    return "0%";
-  }
-  return `${Math.max(4, Math.round((value / max) * 100))}%`;
+function percent(value: number, max: number): number {
+  if (max <= 0) return 0;
+  return Math.max(4, Math.round((value / max) * 100));
 }

@@ -1,27 +1,24 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { PlusOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Card, Flex, Form, Input, Modal, Statistic, Table, Tag, type TableProps } from "antd";
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
-import { Field, Input, Textarea } from "@/components/ui/fields";
-import { MessageBar } from "@/components/ui/message";
-import { initialPagination, Pagination } from "@/components/ui/pagination";
-import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
+import { initialPagination, tablePagination } from "@/features/pagination";
 import type { Paginated, Shop } from "@/features/types";
-import { useMessage } from "@/features/use-message";
 import { apiGet, apiPost } from "@/lib/api";
 import { formatDateTime, formatQuantity } from "@/lib/format";
 
+type ShopValues = { name: string; note?: string };
+
 export default function ShopsPage() {
+  const { message } = App.useApp();
   const [shops, setShops] = useState<Shop[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(initialPagination);
-  const { message, show } = useMessage();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -42,52 +39,56 @@ export default function ShopsPage() {
     void load();
   }, [load]);
 
+  const columns: TableProps<Shop>["columns"] = [
+    { title: "名称", dataIndex: "Name", width: 180, render: (value: string) => <strong>{value}</strong> },
+    { title: "备注", dataIndex: "Note", ellipsis: true, render: (value: string) => <span className="muted">{value || "-"}</span> },
+    { title: "状态", dataIndex: "Enabled", width: 100, render: (value: boolean) => <Tag color={value ? "green" : "red"}>{value ? "启用" : "禁用"}</Tag> },
+    { title: "创建时间", dataIndex: "CreatedAt", width: 180, render: (value: string) => <span className="muted">{formatDateTime(value)}</span> },
+  ];
+
   return (
-    <div className="space-y-5">
+    <Flex gap={20} vertical>
       <PageHeader
-        title="店铺"
+        actions={<Button icon={<PlusOutlined />} type="primary" onClick={() => setOpen(true)}>新增店铺</Button>}
         description="店铺用于销售出库归属，不单独持有库存。"
-        actions={
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild><Button><Plus className="h-4 w-4" />新增店铺</Button></DialogTrigger>
-            <DialogContent title="新增店铺">
-              <ShopForm
-                onCreated={() => {
-                  setOpen(false);
-                  show("店铺已创建");
-                  if (page === 1) void load();
-                  else setPage(1);
-                }}
-              />
-            </DialogContent>
-          </Dialog>
-        }
+        title="店铺"
       />
-      <div className="rounded-lg border border-[var(--border-subtle)] bg-white p-4">
-        <div className="text-xs text-[var(--text-secondary)]">店铺数量</div>
-        <div className="mt-2 text-xl font-semibold">{formatQuantity(pagination.total)}</div>
-      </div>
-      {loading ? <LoadingBlock label="加载店铺" /> : error ? <ErrorBlock message={error} onRetry={load} /> : <ShopsTable shops={shops} />}
-      <Pagination meta={pagination} onPageChange={setPage} />
-      <MessageBar message={message} />
-    </div>
+      <Card className="metric-card"><Statistic title="店铺数量" value={formatQuantity(pagination.total)} /></Card>
+      {error ? <Alert action={<Button size="small" onClick={() => void load()}>重试</Button>} message={error} showIcon type="error" /> : null}
+      <Card className="table-card">
+        <Table<Shop>
+          columns={columns}
+          dataSource={shops}
+          loading={loading}
+          pagination={tablePagination(pagination, setPage)}
+          rowKey="ID"
+          scroll={{ x: 700 }}
+        />
+      </Card>
+      <Modal destroyOnHidden footer={null} open={open} title="新增店铺" onCancel={() => setOpen(false)}>
+        <ShopForm
+          onCancel={() => setOpen(false)}
+          onCreated={() => {
+            setOpen(false);
+            message.success("店铺已创建");
+            if (page === 1) void load();
+            else setPage(1);
+          }}
+        />
+      </Modal>
+    </Flex>
   );
 }
 
-function ShopForm({ onCreated }: { onCreated: () => void }) {
-  const [saving, setSaving] = useState(false);
+function ShopForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submit(values: ShopValues) {
     setSaving(true);
     setError("");
-    const form = new FormData(event.currentTarget);
     try {
-      await apiPost<{ item: Shop }>("/shops", {
-        name: String(form.get("name") ?? ""),
-        note: String(form.get("note") ?? ""),
-      });
+      await apiPost<{ item: Shop }>("/shops", { name: values.name, note: values.note ?? "" });
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
@@ -97,44 +98,14 @@ function ShopForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form className="grid gap-4" onSubmit={submit}>
-      {error ? <ErrorBlock message={error} /> : null}
-      <Field label="店铺名称"><Input name="name" required /></Field>
-      <Field label="备注"><Textarea name="note" /></Field>
-      <div className="flex justify-end gap-2">
-        <DialogClose asChild><Button type="button" variant="secondary">取消</Button></DialogClose>
-        <Button loading={saving} type="submit">保存店铺</Button>
-      </div>
-    </form>
-  );
-}
-
-function ShopsTable({ shops }: { shops: Shop[] }) {
-  if (shops.length === 0) {
-    return <EmptyBlock title="还没有店铺" />;
-  }
-  return (
-    <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-white">
-      <table className="w-full min-w-[640px] text-left text-sm">
-        <thead className="border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
-          <tr>
-            <th className="px-4 py-3 font-medium">名称</th>
-            <th className="px-4 py-3 font-medium">备注</th>
-            <th className="px-4 py-3 font-medium">状态</th>
-            <th className="px-4 py-3 font-medium">创建时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          {shops.map((shop) => (
-            <tr className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-black/[0.02]" key={shop.ID}>
-              <td className="px-4 py-3 font-medium">{shop.Name}</td>
-              <td className="px-4 py-3 text-[var(--text-secondary)]">{shop.Note || "-"}</td>
-              <td className="px-4 py-3">{shop.Enabled ? "启用" : "禁用"}</td>
-              <td className="px-4 py-3 text-[var(--text-secondary)]">{formatDateTime(shop.CreatedAt)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Form<ShopValues> layout="vertical" requiredMark={false} onFinish={submit}>
+      {error ? <Alert message={error} showIcon style={{ marginBottom: 16 }} type="error" /> : null}
+      <Form.Item label="店铺名称" name="name" rules={[{ required: true, message: "请输入店铺名称" }]}><Input /></Form.Item>
+      <Form.Item label="备注" name="note"><Input.TextArea maxLength={500} rows={3} showCount /></Form.Item>
+      <Flex gap={8} justify="flex-end">
+        <Button onClick={onCancel}>取消</Button>
+        <Button htmlType="submit" loading={saving} type="primary">保存店铺</Button>
+      </Flex>
+    </Form>
   );
 }

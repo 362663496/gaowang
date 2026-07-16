@@ -1,47 +1,52 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { Alert, App, Button, Card, Col, Descriptions, Flex, Form, Input, Row, Tag } from "antd";
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/fields";
-import { MessageBar } from "@/components/ui/message";
-import { ErrorBlock } from "@/components/ui/state";
 import type { AppSettings } from "@/features/types";
-import { submitChangePassword } from "@/features/users/password";
-import { useMessage } from "@/features/use-message";
+import { changePassword, type ChangePasswordInput } from "@/features/users/password";
 import { apiGet, apiPost, readDevSession, type Role } from "@/lib/api";
 
+type SettingsValues = { backup_email_recipient: string };
+
 export default function SettingsPage() {
+  const { message } = App.useApp();
+  const [passwordForm] = Form.useForm<ChangePasswordInput>();
+  const [settingsForm] = Form.useForm<SettingsValues>();
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState<Role>("admin");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [backupEmailRecipient, setBackupEmailRecipient] = useState("");
-  const { message, show } = useMessage();
 
-  async function loadSettings() {
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
       const data = await apiGet<{ settings: AppSettings }>("/settings");
-      setBackupEmailRecipient(data.settings.backup_email_recipient);
+      settingsForm.setFieldsValue({ backup_email_recipient: data.settings.backup_email_recipient });
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载设置失败");
+    } finally {
+      setLoading(false);
     }
-  }
+  }, [settingsForm]);
 
   useEffect(() => {
     const session = readDevSession();
     setUserId(session.userId);
     setRole(session.role);
     void loadSettings();
-  }, []);
+  }, [loadSettings]);
 
-  async function changePassword(event: FormEvent<HTMLFormElement>) {
+  async function submitPassword(values: ChangePasswordInput) {
     setSaving(true);
     setError("");
     try {
-      await submitChangePassword(event);
-      show("密码已更新");
+      await changePassword(values);
+      passwordForm.resetFields();
+      message.success("密码已更新");
     } catch (err) {
       setError(err instanceof Error ? err.message : "修改密码失败");
     } finally {
@@ -49,14 +54,13 @@ export default function SettingsPage() {
     }
   }
 
-  async function saveSettings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveSettings(values: SettingsValues) {
     setSettingsSaving(true);
     setError("");
     try {
-      const data = await apiPost<{ settings: AppSettings }>("/settings", { backup_email_recipient: backupEmailRecipient });
-      setBackupEmailRecipient(data.settings.backup_email_recipient);
-      show("备份设置已保存");
+      const data = await apiPost<{ settings: AppSettings }>("/settings", values);
+      settingsForm.setFieldsValue({ backup_email_recipient: data.settings.backup_email_recipient });
+      message.success("备份设置已保存");
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存设置失败");
     } finally {
@@ -65,45 +69,65 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <PageHeader title="设置" description="查看当前账号并修改自己的密码。" />
-      {error ? <ErrorBlock message={error} /> : null}
-      <div className="grid gap-4 xl:grid-cols-2">
-        <section className="rounded-lg border border-[var(--border-subtle)] bg-white p-4">
-          <h2 className="font-semibold">当前账号</h2>
-          <div className="mt-4 grid gap-3 text-sm">
-            <div>
-              <div className="font-medium">用户 ID</div>
-              <div className="mt-1 break-all rounded-md border border-[var(--border-subtle)] bg-black/[0.02] px-3 py-2 font-mono text-xs text-[var(--text-secondary)]">{userId}</div>
-            </div>
-            <div>
-              <div className="font-medium">角色</div>
-              <div className="mt-1 rounded-md border border-[var(--border-subtle)] bg-black/[0.02] px-3 py-2 text-[var(--text-secondary)]">{role}</div>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-lg border border-[var(--border-subtle)] bg-white p-4">
-          <h2 className="font-semibold">修改密码</h2>
-          <form className="mt-4 grid gap-3" onSubmit={changePassword}>
-            <Field label="当前密码"><Input minLength={8} name="current_password" required type="password" /></Field>
-            <Field label="新密码"><Input minLength={8} name="new_password" required type="password" /></Field>
-            <Field label="确认新密码"><Input minLength={8} name="confirm_password" required type="password" /></Field>
-            <div><Button loading={saving} type="submit">更新密码</Button></div>
-          </form>
-        </section>
-
-        <section className="rounded-lg border border-[var(--border-subtle)] bg-white p-4">
-          <h2 className="font-semibold">备份设置</h2>
-          <form className="mt-4 grid gap-3" onSubmit={saveSettings}>
-            <Field label="备份邮件收件人">
-              <Input name="backup_email_recipient" required type="email" value={backupEmailRecipient} onChange={(event) => setBackupEmailRecipient(event.target.value)} />
-            </Field>
-            <div><Button loading={settingsSaving} type="submit">保存设置</Button></div>
-          </form>
-        </section>
-      </div>
-      <MessageBar message={message} />
-    </div>
+    <Flex gap={20} vertical>
+      <PageHeader description="查看当前账号、修改密码和维护备份邮件设置。" title="设置" />
+      {error ? (
+        <Alert
+          action={<Button size="small" onClick={() => void loadSettings()}>重试</Button>}
+          closable
+          message={error}
+          showIcon
+          type="error"
+          onClose={() => setError("")}
+        />
+      ) : null}
+      <Row gutter={[16, 16]}>
+        <Col xl={12} xs={24}>
+          <Card title="当前账号">
+            <Descriptions
+              column={1}
+              items={[
+                { key: "id", label: "用户 ID", children: <span className="mono">{userId || "-"}</span> },
+                { key: "role", label: "角色", children: <Tag color={role === "admin" ? "purple" : "blue"}>{role}</Tag> },
+              ]}
+            />
+          </Card>
+        </Col>
+        <Col xl={12} xs={24}>
+          <Card title="修改密码">
+            <Form<ChangePasswordInput> form={passwordForm} layout="vertical" requiredMark={false} onFinish={submitPassword}>
+              <Form.Item label="当前密码" name="current_password" rules={[{ required: true, min: 8, message: "请输入至少 8 位当前密码" }]}><Input.Password /></Form.Item>
+              <Form.Item label="新密码" name="new_password" rules={[{ required: true, min: 8, message: "请输入至少 8 位新密码" }]}><Input.Password /></Form.Item>
+              <Form.Item
+                dependencies={["new_password"]}
+                label="确认新密码"
+                name="confirm_password"
+                rules={[
+                  { required: true, message: "请再次输入新密码" },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      return !value || getFieldValue("new_password") === value
+                        ? Promise.resolve()
+                        : Promise.reject(new Error("两次输入的新密码不一致"));
+                    },
+                  }),
+                ]}
+              ><Input.Password /></Form.Item>
+              <Button htmlType="submit" loading={saving} type="primary">更新密码</Button>
+            </Form>
+          </Card>
+        </Col>
+        <Col xl={12} xs={24}>
+          <Card loading={loading} title="备份设置">
+            <Form<SettingsValues> form={settingsForm} layout="vertical" requiredMark={false} onFinish={saveSettings}>
+              <Form.Item label="备份邮件收件人" name="backup_email_recipient" rules={[{ required: true, type: "email", message: "请输入有效邮箱" }]}>
+                <Input />
+              </Form.Item>
+              <Button htmlType="submit" loading={settingsSaving} type="primary">保存设置</Button>
+            </Form>
+          </Card>
+        </Col>
+      </Row>
+    </Flex>
   );
 }
