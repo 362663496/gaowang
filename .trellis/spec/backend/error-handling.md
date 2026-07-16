@@ -40,49 +40,57 @@ Middleware must use the same envelope and abort after writing a terminal respons
 
 Do not expose passwords, auth secrets, SMTP credentials, or the database URL in response messages or audit metadata. Existing CRUD handlers sometimes surface a raw GORM error as a 400 response; do not copy that pattern to new security-sensitive or internal failures—prefer a stable public message while retaining wrapped context for process-level logs.
 
-## Scenario: Product lifecycle mutations
+## Scenario: Product archive and inventory mutations
 
 ### 1. Scope / Trigger
 
-Use this contract when changing a product's enabled state or deleting a product. These mutations cross the HTTP, GORM, audit, upload-file, and frontend boundaries.
+Use this contract when listing, changing, deleting, or posting inventory for a product. These operations cross the HTTP, GORM, audit, upload-file, reporting, and frontend boundaries.
 
 ### 2. Signatures
 
+- `GET /api/v1/products[?include_archived=true]`
+- `GET /api/v1/inventory`
 - `PATCH /api/v1/products/:id/enabled`
 - `DELETE /api/v1/products/:id`
-- Database references: `inventory_snapshots.product_id` and `stock_movements.product_id` both restrict product deletion.
+- `POST /api/v1/inventory/inbound|sales-outbound|adjustment`
+- Database fields: nullable `products.archived_at`; nullable `stock_movements.shop_id`; restrictive product foreign keys from snapshots and movements.
 
 ### 3. Contracts
 
 - PATCH request: `{"enabled": <boolean>}`; use `*bool` in the request struct so explicit `false` differs from omission.
 - PATCH success: `200 {"item": Product}` and audit action `product.enable` or `product.disable`.
-- DELETE success: `204`, audit action `product.delete`, then best-effort removal of the product image using `filepath.Base(ImagePath)` inside the configured upload directory.
-- Both routes stay in the authenticated product route group; disabling does not change inventory-operation eligibility.
+- `GET /products` excludes rows with `archived_at`; `include_archived=true` includes them for historical filters. `GET /inventory` always excludes archived products.
+- DELETE success is always `204`. A never-used product is hard-deleted, audited as `product.delete`, and its image is removed best-effort using `filepath.Base(ImagePath)`. A used zero-stock product is kept with `ArchivedAt != nil` and `Enabled=false`, audited as `product.archive`, and retains its image and history.
+- Historical movement and sales-report queries continue to include archived products; product-ranking rows expose `archived: boolean`.
+- Inbound accepts optional `shop_id`. Omission or `""` stores `NULL`; a valid UUID is copied only to the movement and does not create per-shop inventory.
 
 ### 4. Validation & Error Matrix
 
 | Condition | Response |
 | --- | --- |
-| Invalid UUID or missing/non-boolean `enabled` | `400 VALIDATION` |
-| Product does not exist | `404 PRODUCT_NOT_FOUND` |
-| Inventory snapshot or stock movement references the product | `409 PRODUCT_IN_USE` |
-| Lookup/reference/update/delete query fails | `500` with a stable product-specific code |
+| Invalid UUID, invalid non-empty `shop_id`, or missing/non-boolean `enabled` | `400 VALIDATION` |
+| Product does not exist or is already archived for lifecycle mutation | `404 PRODUCT_NOT_FOUND` |
+| Product current quantity is not zero during DELETE | `409 PRODUCT_HAS_STOCK` |
+| Inventory write targets an archived product | `409 PRODUCT_ARCHIVED` |
+| Omitted or empty inbound `shop_id` | accepted; movement `shop_id` is `NULL` |
+| Lookup/update/archive/delete query fails | `500` with a stable product-specific code |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: `{"enabled": false}` persists `false`, returns the updated product, and records `product.disable`.
-- Base: a never-used product deletes with `204`; its database row and private upload file disappear.
-- Bad: a referenced product returns `409`; the product, inventory snapshot, and movement history remain unchanged.
+- Good: a used zero-stock product archives with `204`; operational lists hide it while history, image, and financial aggregates remain.
+- Base: a never-used product hard-deletes with `204`; its database row and private upload file disappear. Inbound without `shop_id` remains valid.
+- Bad: a nonzero-stock product returns `409 PRODUCT_HAS_STOCK`, and an archived product inventory write returns `409 PRODUCT_ARCHIVED`; neither operation changes stock or movements.
 
 ### 6. Tests Required
 
-Use a route-level `httptest` test with SQLite. Assert explicit `false` and `true` persist, all lifecycle audits exist, an unused product and its image are removed, and a referenced product returns `409 PRODUCT_IN_USE` while remaining stored.
+Use route-level `httptest` tests with SQLite plus inventory-service tests. Assert explicit enable states; hard-delete row/image/audit behavior; zero-stock archive visibility, retained image/history, and audit behavior; nonzero-stock rejection; archived-write rejection with no new snapshot/movement; optional inbound shop persistence; and unchanged historical sales summary/ranking with `archived=true`.
 
 ### 7. Wrong vs Correct
 
-Wrong: bind `enabled` to a plain `bool` with `binding:"required"`, or delete before checking references; explicit `false` is rejected and history safety depends on an opaque database error.
+Wrong: use `gorm.DeletedAt`, filter archived products from historical reports, or check stock without sharing the same lock order as inventory writes. Preloads lose product details, financial history disappears, or a concurrent write can land after archive.
 
-Correct: bind to `*bool`, check both reference tables, return the stable `PRODUCT_IN_USE` conflict, and leave the database `RESTRICT` constraints as the final safety net.
+Correct: use explicit nullable `ArchivedAt`; filter only operational queries; lock product row then snapshot in both delete and inventory transactions; return stable conflict codes; and retain database `RESTRICT` constraints as the hard-delete safety net.
 
 ## Tests
 

@@ -31,7 +31,7 @@ type auditLogResponse struct {
 
 func (h AuditHandler) List(c *gin.Context) {
 	var logs []models.AuditLog
-	query := h.DB.Preload("Actor").Order("created_at desc").Limit(queryLimit(c, 100, 500))
+	query := h.DB.Model(&models.AuditLog{})
 	if value := c.Query("actor_id"); value != "" {
 		query = query.Where("actor_id = ?", value)
 	}
@@ -50,7 +50,12 @@ func (h AuditHandler) List(c *gin.Context) {
 	if to, ok := queryDate(c, "to"); ok {
 		query = query.Where("created_at < ?", to.AddDate(0, 0, 1))
 	}
-	if err := query.Find(&logs).Error; err != nil {
+	query, meta, err := paginate(c, query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to count audit logs")
+		return
+	}
+	if err := query.Preload("Actor").Order("created_at desc").Find(&logs).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to list audit logs")
 		return
 	}
@@ -58,7 +63,7 @@ func (h AuditHandler) List(c *gin.Context) {
 	for _, log := range logs {
 		items = append(items, auditResponse(log))
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	writePage(c, items, meta)
 }
 
 func recordAudit(c *gin.Context, db *gorm.DB, action string, resourceType string, resourceID string, metadata map[string]string) {

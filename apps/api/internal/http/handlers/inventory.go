@@ -19,6 +19,7 @@ type InventoryHandler struct {
 
 type inboundRequest struct {
 	ProductID string `json:"product_id" binding:"required"`
+	ShopID    string `json:"shop_id"`
 	Quantity  int64  `json:"quantity" binding:"required,gt=0"`
 	UnitCents *int64 `json:"unit_cents" binding:"required,gte=0"`
 }
@@ -38,11 +39,25 @@ type adjustmentRequest struct {
 
 func (h InventoryHandler) ListCurrent(c *gin.Context) {
 	var items []models.InventorySnapshot
-	if err := h.DB.Preload("Product").Order("updated_at desc").Find(&items).Error; err != nil {
+	base := h.DB.Model(&models.InventorySnapshot{}).
+		Joins("JOIN products ON products.id = inventory_snapshots.product_id").
+		Where("products.archived_at IS NULL")
+	if c.Query("low_stock") == "true" {
+		base = base.Where("products.low_stock_threshold > 0 AND inventory_snapshots.quantity <= products.low_stock_threshold")
+	}
+	query, meta, err := paginate(c, base)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to count inventory")
+		return
+	}
+	if err := query.
+		Preload("Product").
+		Order("inventory_snapshots.updated_at desc").
+		Find(&items).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to list inventory")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	writePage(c, items, meta)
 }
 
 func (h InventoryHandler) CreateInbound(c *gin.Context) {
@@ -54,11 +69,23 @@ func (h InventoryHandler) CreateInbound(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var shopID *uuid.UUID
+	if req.ShopID != "" {
+		parsedShopID, ok := parseUUID(c, req.ShopID, "shop_id")
+		if !ok {
+			return
+		}
+		shopID = &parsedShopID
+	}
 	err := services.InventoryService{DB: h.DB}.CreateInbound(services.InboundInput{
-		ProductID: productID, Quantity: req.Quantity, UnitCents: *req.UnitCents, OperatorID: currentUserID(c),
+		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, UnitCents: *req.UnitCents, OperatorID: currentUserID(c),
 	})
 	if writeStockResult(c, err) {
-		recordAudit(c, h.DB, "inventory.inbound", "product", productID.String(), map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10)})
+		metadata := map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10)}
+		if shopID != nil {
+			metadata["shop_id"] = shopID.String()
+		}
+		recordAudit(c, h.DB, "inventory.inbound", "product", productID.String(), metadata)
 	}
 }
 
@@ -137,6 +164,10 @@ func writeStockResult(c *gin.Context, err error) bool {
 	}
 	if errors.Is(err, services.ErrInsufficientStock) {
 		writeError(c, http.StatusConflict, "INSUFFICIENT_STOCK", err.Error())
+		return false
+	}
+	if errors.Is(err, services.ErrProductArchived) {
+		writeError(c, http.StatusConflict, "PRODUCT_ARCHIVED", "商品已归档，不能进行库存操作")
 		return false
 	}
 	writeError(c, http.StatusBadRequest, "STOCK_OPERATION_FAILED", err.Error())

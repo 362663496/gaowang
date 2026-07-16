@@ -31,11 +31,16 @@ type createUserRequest struct {
 
 func (h UserHandler) List(c *gin.Context) {
 	var users []userResponse
-	if err := h.DB.Model(&models.User{}).Order("created_at desc").Find(&users).Error; err != nil {
+	query, meta, err := paginate(c, h.DB.Model(&models.User{}))
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to count users")
+		return
+	}
+	if err := query.Order("created_at desc").Find(&users).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to list users")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": users})
+	writePage(c, users, meta)
 }
 
 func (h UserHandler) Create(c *gin.Context) {

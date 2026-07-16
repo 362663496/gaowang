@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"gaowang/apps/api/internal/models"
 	"github.com/google/uuid"
@@ -85,7 +86,7 @@ func Test_InventoryService_records_inbound_sale_and_adjustment(t *testing.T) {
 	service := InventoryService{DB: db}
 
 	// When
-	if err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 10, UnitCents: 100, OperatorID: operator.ID}); err != nil {
+	if err := service.CreateInbound(InboundInput{ProductID: product.ID, ShopID: &shop.ID, Quantity: 10, UnitCents: 100, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("CreateInbound() error = %v", err)
 	}
 	if err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 4, SaleUnitCents: 250, OperatorID: operator.ID}); err != nil {
@@ -103,12 +104,91 @@ func Test_InventoryService_records_inbound_sale_and_adjustment(t *testing.T) {
 	if snapshot.Quantity != 4 || snapshot.MovingAverageCostCents != 100 || snapshot.InventoryValueCents != 400 {
 		t.Fatalf("snapshot = qty %d cost %d value %d, want 4/100/400", snapshot.Quantity, snapshot.MovingAverageCostCents, snapshot.InventoryValueCents)
 	}
+	var inbound models.StockMovement
+	if err := db.First(&inbound, "type = ?", models.MovementTypeInbound).Error; err != nil {
+		t.Fatalf("load inbound movement: %v", err)
+	}
+	if inbound.ShopID == nil || *inbound.ShopID != shop.ID {
+		t.Fatalf("inbound shop = %v, want %s", inbound.ShopID, shop.ID)
+	}
 	var outbound models.StockMovement
 	if err := db.First(&outbound, "type = ?", models.MovementTypeSalesOutbound).Error; err != nil {
 		t.Fatalf("load outbound movement: %v", err)
 	}
 	if outbound.RevenueCents != 1000 || outbound.CostAmountCents != 400 || outbound.GrossProfitCents != 600 {
 		t.Fatalf("outbound amounts = revenue %d cost %d gross %d, want 1000/400/600", outbound.RevenueCents, outbound.CostAmountCents, outbound.GrossProfitCents)
+	}
+}
+
+func Test_InventoryService_allows_inbound_without_shop(t *testing.T) {
+	db := newInventoryTestDB(t)
+	product := models.Product{Name: "Water", Code: "WATER", Enabled: true}
+	operator := models.User{Name: "Admin", Email: "water@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	if err := db.Create(&operator).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := (InventoryService{DB: db}).CreateInbound(InboundInput{ProductID: product.ID, Quantity: 1, UnitCents: 50, OperatorID: operator.ID}); err != nil {
+		t.Fatalf("CreateInbound() error = %v", err)
+	}
+	var movement models.StockMovement
+	if err := db.First(&movement, "type = ?", models.MovementTypeInbound).Error; err != nil {
+		t.Fatalf("load inbound movement: %v", err)
+	}
+	if movement.ShopID != nil {
+		t.Fatalf("inbound shop = %v, want nil", movement.ShopID)
+	}
+}
+
+func Test_InventoryService_rejects_all_writes_for_archived_product(t *testing.T) {
+	db := newInventoryTestDB(t)
+	archivedAt := time.Now()
+	product := models.Product{Name: "Archived", Code: "ARCHIVED", Enabled: false, ArchivedAt: &archivedAt}
+	operator := models.User{Name: "Admin", Email: "archived@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
+	shop := models.Shop{Name: "Main", Enabled: true}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	if err := db.Create(&operator).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&shop).Error; err != nil {
+		t.Fatalf("create shop: %v", err)
+	}
+	service := InventoryService{DB: db}
+	operations := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "inbound", run: func() error {
+			return service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 1, UnitCents: 100, OperatorID: operator.ID})
+		}},
+		{name: "outbound", run: func() error {
+			return service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 1, SaleUnitCents: 100, OperatorID: operator.ID})
+		}},
+		{name: "adjustment", run: func() error {
+			return service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: 1, Reason: "test", OperatorID: operator.ID})
+		}},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			if err := operation.run(); !errors.Is(err, ErrProductArchived) {
+				t.Fatalf("error = %v, want %v", err, ErrProductArchived)
+			}
+		})
+	}
+	var snapshots int64
+	var movements int64
+	if err := db.Model(&models.InventorySnapshot{}).Where("product_id = ?", product.ID).Count(&snapshots).Error; err != nil {
+		t.Fatalf("count snapshots: %v", err)
+	}
+	if err := db.Model(&models.StockMovement{}).Where("product_id = ?", product.ID).Count(&movements).Error; err != nil {
+		t.Fatalf("count movements: %v", err)
+	}
+	if snapshots != 0 || movements != 0 {
+		t.Fatalf("archived writes persisted snapshots/movements = %d/%d, want 0/0", snapshots, movements)
 	}
 }
 

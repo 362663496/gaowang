@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/fields";
 import { MessageBar } from "@/components/ui/message";
+import { initialPagination, Pagination } from "@/components/ui/pagination";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
-import type { Shop } from "@/features/types";
+import type { Paginated, Shop } from "@/features/types";
 import { useMessage } from "@/features/use-message";
 import { apiGet, apiPost } from "@/lib/api";
 import { formatDateTime, formatQuantity } from "@/lib/format";
@@ -18,19 +19,24 @@ export default function ShopsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(initialPagination);
   const { message, show } = useMessage();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      setShops((await apiGet<{ items: Shop[] }>("/shops")).items);
+      const data = await apiGet<Paginated<Shop>>(`/shops?page=${page}`);
+      setShops(data.items);
+      setPagination(data.pagination);
+      if (data.pagination.page !== page) setPage(data.pagination.page);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     void load();
@@ -49,7 +55,8 @@ export default function ShopsPage() {
                 onCreated={() => {
                   setOpen(false);
                   show("店铺已创建");
-                  void load();
+                  if (page === 1) void load();
+                  else setPage(1);
                 }}
               />
             </DialogContent>
@@ -58,9 +65,10 @@ export default function ShopsPage() {
       />
       <div className="rounded-lg border border-[var(--border-subtle)] bg-white p-4">
         <div className="text-xs text-[var(--text-secondary)]">店铺数量</div>
-        <div className="mt-2 text-xl font-semibold">{formatQuantity(shops.length)}</div>
+        <div className="mt-2 text-xl font-semibold">{formatQuantity(pagination.total)}</div>
       </div>
       {loading ? <LoadingBlock label="加载店铺" /> : error ? <ErrorBlock message={error} onRetry={load} /> : <ShopsTable shops={shops} />}
+      <Pagination meta={pagination} onPageChange={setPage} />
       <MessageBar message={message} />
     </div>
   );

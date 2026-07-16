@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/fields";
 import { ErrorBlock } from "@/components/ui/state";
+import { ProductCombobox } from "@/features/product-combobox";
 import type { InventorySnapshot, Product, Shop } from "@/features/types";
 import { apiPost } from "@/lib/api";
 import { centsToYuanInput, formatQuantity, yuanToCents } from "@/lib/format";
@@ -20,24 +21,20 @@ type Props = {
 export function InventoryActions({ products, shops, inventory, onDone }: Props) {
   return (
     <>
-      <InboundForm products={products} onDone={onDone} />
+      <InboundForm products={products} shops={shops} onDone={onDone} />
       <OutboundForm inventory={inventory} products={products} shops={shops} onDone={onDone} />
       <AdjustmentForm inventory={inventory} products={products} onDone={onDone} />
     </>
   );
 }
 
-function InboundForm({ products, onDone }: Pick<Props, "products" | "onDone">) {
+function InboundForm({ products, shops, onDone }: Pick<Props, "products" | "shops" | "onDone">) {
   const [open, setOpen] = useState(false);
-  const [productID, setProductID] = useState(products[0]?.ID ?? "");
+  const [productID, setProductID] = useState("");
   const [unitYuan, setUnitYuan] = useState("0.00");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const product = products.find((item) => item.ID === productID);
-
-  useEffect(() => {
-    if (!productID && products[0]) setProductID(products[0].ID);
-  }, [productID, products]);
 
   useEffect(() => {
     setUnitYuan(centsToYuanInput(product?.DefaultPurchaseCents ?? 0));
@@ -45,12 +42,17 @@ function InboundForm({ products, onDone }: Pick<Props, "products" | "onDone">) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!productID) {
+      setError("请选择有效商品");
+      return;
+    }
     setSaving(true);
     setError("");
     const form = new FormData(event.currentTarget);
     try {
       await apiPost("/inventory/inbound", {
         product_id: productID,
+        shop_id: String(form.get("shop_id") ?? ""),
         quantity: Number(form.get("quantity")),
         unit_cents: yuanToCents(String(form.get("unit_yuan") ?? "")),
       });
@@ -70,6 +72,12 @@ function InboundForm({ products, onDone }: Pick<Props, "products" | "onDone">) {
         <form className="grid gap-4" onSubmit={submit}>
           {error ? <ErrorBlock message={error} /> : null}
           <ProductSelect products={products} value={productID} onChange={setProductID} />
+          <Field label="店铺（可选）">
+            <Select defaultValue="" name="shop_id">
+              <option value="">不选择店铺</option>
+              {shops.map((shop) => <option key={shop.ID} value={shop.ID}>{shop.Name}</option>)}
+            </Select>
+          </Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="数量"><Input min="1" name="quantity" required type="number" /></Field>
             <Field label="进货单价（元）"><Input min="0" name="unit_yuan" required step="0.01" type="number" value={unitYuan} onChange={(event) => setUnitYuan(event.target.value)} /></Field>
@@ -83,7 +91,7 @@ function InboundForm({ products, onDone }: Pick<Props, "products" | "onDone">) {
 
 function OutboundForm({ products, shops, inventory, onDone }: Props) {
   const [open, setOpen] = useState(false);
-  const [productID, setProductID] = useState(products[0]?.ID ?? "");
+  const [productID, setProductID] = useState("");
   const [saleYuan, setSaleYuan] = useState("0.00");
   const [quantity, setQuantity] = useState(1);
   const [error, setError] = useState("");
@@ -93,15 +101,15 @@ function OutboundForm({ products, shops, inventory, onDone }: Props) {
   const shortage = quantity > stock;
 
   useEffect(() => {
-    if (!productID && products[0]) setProductID(products[0].ID);
-  }, [productID, products]);
-
-  useEffect(() => {
     setSaleYuan(centsToYuanInput(product?.DefaultSaleCents ?? 0));
   }, [product]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!productID) {
+      setError("请选择有效商品");
+      return;
+    }
     setSaving(true);
     setError("");
     const form = new FormData(event.currentTarget);
@@ -149,16 +157,16 @@ function OutboundForm({ products, shops, inventory, onDone }: Props) {
 
 function AdjustmentForm({ products, onDone }: Pick<Props, "products" | "inventory" | "onDone">) {
   const [open, setOpen] = useState(false);
-  const [productID, setProductID] = useState(products[0]?.ID ?? "");
+  const [productID, setProductID] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!productID && products[0]) setProductID(products[0].ID);
-  }, [productID, products]);
-
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!productID) {
+      setError("请选择有效商品");
+      return;
+    }
     setSaving(true);
     setError("");
     const form = new FormData(event.currentTarget);
@@ -194,14 +202,8 @@ function AdjustmentForm({ products, onDone }: Pick<Props, "products" | "inventor
 }
 
 function ProductSelect({ products, value, onChange }: { products: Product[]; value: string; onChange: (id: string) => void }) {
-  const options = useMemo(() => products.filter((product) => product.Enabled), [products]);
-  return (
-    <Field label="商品">
-      <Select value={value} onChange={(event) => onChange(event.target.value)} required>
-        {options.map((product) => <option key={product.ID} value={product.ID}>{product.Name} · {product.Code}</option>)}
-      </Select>
-    </Field>
-  );
+  const enabledProducts = useMemo(() => products.filter((product) => product.Enabled && !product.ArchivedAt), [products]);
+  return <ProductCombobox products={enabledProducts} required value={value} onChange={onChange} />;
 }
 
 function Actions({ saving, label }: { saving: boolean; label: string }) {

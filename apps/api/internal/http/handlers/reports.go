@@ -30,6 +30,7 @@ type productRankingRow struct {
 	ProductID        string `json:"product_id"`
 	ProductName      string `json:"product_name"`
 	ProductCode      string `json:"product_code"`
+	Archived         bool   `json:"archived"`
 	RevenueCents     int64  `json:"revenue_cents"`
 	CostCents        int64  `json:"cost_cents"`
 	GrossProfitCents int64  `json:"gross_profit_cents"`
@@ -80,8 +81,8 @@ func (h ReportHandler) ProductRanking(c *gin.Context) {
 	items := make([]productRankingRow, 0)
 	err := salesReportBase(h.DB, from, to).
 		Joins("JOIN products ON products.id = stock_movements.product_id").
-		Select("stock_movements.product_id AS product_id, products.name AS product_name, products.code AS product_code, COALESCE(SUM(stock_movements.revenue_cents),0) AS revenue_cents, COALESCE(SUM(stock_movements.cost_amount_cents),0) AS cost_cents, COALESCE(SUM(stock_movements.gross_profit_cents),0) AS gross_profit_cents, COALESCE(SUM(-stock_movements.quantity_delta),0) AS quantity_sold, COUNT(*) AS movement_count").
-		Group("stock_movements.product_id, products.name, products.code").
+		Select("stock_movements.product_id AS product_id, products.name AS product_name, products.code AS product_code, products.archived_at IS NOT NULL AS archived, COALESCE(SUM(stock_movements.revenue_cents),0) AS revenue_cents, COALESCE(SUM(stock_movements.cost_amount_cents),0) AS cost_cents, COALESCE(SUM(stock_movements.gross_profit_cents),0) AS gross_profit_cents, COALESCE(SUM(-stock_movements.quantity_delta),0) AS quantity_sold, COUNT(*) AS movement_count").
+		Group("stock_movements.product_id, products.name, products.code, products.archived_at").
 		Order("revenue_cents desc").
 		Limit(queryLimit(c, 10, 50)).
 		Scan(&items).Error

@@ -1,12 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/fields";
 import { MessageBar } from "@/components/ui/message";
+import { initialPagination, Pagination } from "@/components/ui/pagination";
 import { ErrorBlock } from "@/components/ui/state";
-import type { User } from "@/features/types";
+import type { Paginated, User } from "@/features/types";
 import { submitCreateUser } from "@/features/users/create-user";
 import { useMessage } from "@/features/use-message";
 import { apiGet } from "@/lib/api";
@@ -14,26 +15,32 @@ import { apiGet } from "@/lib/api";
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(initialPagination);
   const { message, show } = useMessage();
 
-  useEffect(() => {
-    void loadUsers();
-  }, []);
-
-  async function loadUsers() {
+  const loadUsers = useCallback(async () => {
     setError("");
     try {
-      setUsers((await apiGet<{ items: User[] }>("/users")).items);
+      const data = await apiGet<Paginated<User>>(`/users?page=${page}`);
+      setUsers(data.items);
+      setPagination(data.pagination);
+      if (data.pagination.page !== page) setPage(data.pagination.page);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载用户失败");
     }
-  }
+  }, [page]);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     try {
       await submitCreateUser(event);
       show("用户已创建");
-      void loadUsers();
+      if (page === 1) void loadUsers();
+      else setPage(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建用户失败");
     }
@@ -78,6 +85,7 @@ export default function UsersPage() {
           </tbody>
         </table>
       </section>
+      <Pagination meta={pagination} onPageChange={setPage} />
       <MessageBar message={message} />
     </div>
   );

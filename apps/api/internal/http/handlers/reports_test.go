@@ -67,24 +67,37 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create movement: %v", err)
 	}
+	archivedAt := time.Now().UTC()
+	if err := db.Model(&product).Updates(map[string]any{"archived_at": archivedAt, "enabled": false}).Error; err != nil {
+		t.Fatalf("archive product: %v", err)
+	}
 	router := apihttp.NewRouter(config.Config{}, db)
 
 	// When
+	summaryResponse := getReport(t, router, user.ID, "/api/v1/reports/sales-summary")
 	trendResponse := getReport(t, router, user.ID, "/api/v1/reports/sales-trend")
 	productResponse := getReport(t, router, user.ID, "/api/v1/reports/product-ranking")
 	shopResponse := getReport(t, router, user.ID, "/api/v1/reports/shop-ranking")
 
 	// Then
+	assertSalesSummaryResponse(t, summaryResponse, 500, 200, 300)
 	assertTrendResponse(t, trendResponse, createdAt.Format("2006-01-02"), 500, 300)
-	assertProductRankingResponse(t, productResponse, "Tea", 500, 2)
+	assertProductRankingResponse(t, productResponse, "Tea", 500, 2, true)
 	assertShopRankingResponse(t, shopResponse, "Main", 500, 2)
 }
 
 type productRankingRow struct {
 	ProductName      string `json:"product_name"`
+	Archived         bool   `json:"archived"`
 	RevenueCents     int64  `json:"revenue_cents"`
 	GrossProfitCents int64  `json:"gross_profit_cents"`
 	QuantitySold     int64  `json:"quantity_sold"`
+}
+
+type summaryRow struct {
+	RevenueCents     int64 `json:"revenue_cents"`
+	CostCents        int64 `json:"cost_cents"`
+	GrossProfitCents int64 `json:"gross_profit_cents"`
 }
 
 type trendRow struct {
@@ -119,7 +132,23 @@ func assertTrendResponse(t *testing.T, response *httptest.ResponseRecorder, day 
 	}
 }
 
-func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecorder, productName string, revenue int64, quantity int64) {
+func assertSalesSummaryResponse(t *testing.T, response *httptest.ResponseRecorder, revenue int64, cost int64, gross int64) {
+	t.Helper()
+	if response.Code != http.StatusOK {
+		t.Fatalf("summary status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var body struct {
+		Summary summaryRow `json:"summary"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	if body.Summary.RevenueCents != revenue || body.Summary.CostCents != cost || body.Summary.GrossProfitCents != gross {
+		t.Fatalf("summary = %+v, want %d/%d/%d", body.Summary, revenue, cost, gross)
+	}
+}
+
+func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecorder, productName string, revenue int64, quantity int64, archived bool) {
 	t.Helper()
 	if response.Code != http.StatusOK {
 		t.Fatalf("product status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
@@ -133,8 +162,8 @@ func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecor
 	if len(body.Items) != 1 {
 		t.Fatalf("product rows = %d, want 1; body = %s", len(body.Items), response.Body.String())
 	}
-	if body.Items[0].ProductName != productName || body.Items[0].RevenueCents != revenue || body.Items[0].QuantitySold != quantity {
-		t.Fatalf("product row = %+v, want %s/%d/%d", body.Items[0], productName, revenue, quantity)
+	if body.Items[0].ProductName != productName || body.Items[0].RevenueCents != revenue || body.Items[0].QuantitySold != quantity || body.Items[0].Archived != archived {
+		t.Fatalf("product row = %+v, want %s/%d/%d/archived=%t", body.Items[0], productName, revenue, quantity, archived)
 	}
 }
 

@@ -10,7 +10,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var ErrInsufficientStock = errors.New("insufficient stock")
+var (
+	ErrInsufficientStock = errors.New("insufficient stock")
+	ErrProductArchived   = errors.New("product is archived")
+)
 
 type InventoryService struct {
 	DB *gorm.DB
@@ -18,6 +21,7 @@ type InventoryService struct {
 
 type InboundInput struct {
 	ProductID  uuid.UUID
+	ShopID     *uuid.UUID
 	Quantity   int64
 	UnitCents  int64
 	OperatorID uuid.UUID
@@ -72,6 +76,9 @@ func (s InventoryService) CreateInbound(input InboundInput) error {
 		return fmt.Errorf("quantity must be greater than zero")
 	}
 	return s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockActiveProduct(tx, input.ProductID); err != nil {
+			return err
+		}
 		snapshot, err := lockSnapshot(tx, input.ProductID)
 		if err != nil {
 			return err
@@ -85,7 +92,7 @@ func (s InventoryService) CreateInbound(input InboundInput) error {
 		}
 		unit := input.UnitCents
 		movement := models.StockMovement{
-			Type: models.MovementTypeInbound, ProductID: input.ProductID, QuantityDelta: input.Quantity,
+			Type: models.MovementTypeInbound, ProductID: input.ProductID, ShopID: input.ShopID, QuantityDelta: input.Quantity,
 			PurchaseUnitCents: &unit, CostUnitCents: input.UnitCents, PurchaseAmountCents: input.Quantity * input.UnitCents,
 			OperatorID: input.OperatorID,
 		}
@@ -95,6 +102,9 @@ func (s InventoryService) CreateInbound(input InboundInput) error {
 
 func (s InventoryService) CreateSalesOutbound(input OutboundInput) error {
 	return s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockActiveProduct(tx, input.ProductID); err != nil {
+			return err
+		}
 		snapshot, err := lockSnapshot(tx, input.ProductID)
 		if err != nil {
 			return err
@@ -133,6 +143,9 @@ func (s InventoryService) CreateAdjustment(input AdjustmentInput) error {
 		return err
 	}
 	return s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockActiveProduct(tx, input.ProductID); err != nil {
+			return err
+		}
 		snapshot, err := lockSnapshot(tx, input.ProductID)
 		if err != nil {
 			return err
@@ -152,6 +165,17 @@ func (s InventoryService) CreateAdjustment(input AdjustmentInput) error {
 		}
 		return tx.Create(&movement).Error
 	})
+}
+
+func lockActiveProduct(tx *gorm.DB, productID uuid.UUID) error {
+	var product models.Product
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&product, "id = ?", productID).Error; err != nil {
+		return err
+	}
+	if product.ArchivedAt != nil {
+		return ErrProductArchived
+	}
+	return nil
 }
 
 func lockSnapshot(tx *gorm.DB, productID uuid.UUID) (models.InventorySnapshot, error) {

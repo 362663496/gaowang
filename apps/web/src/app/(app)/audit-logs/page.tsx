@@ -5,9 +5,10 @@ import { Search, X } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/fields";
+import { initialPagination, Pagination } from "@/components/ui/pagination";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
 import { AuditActionBadge, auditActionLabel, auditResourceLabel } from "@/features/labels";
-import type { AuditLog, User } from "@/features/types";
+import type { AuditLog, Paginated, User } from "@/features/types";
 import { apiGet } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 
@@ -16,9 +17,11 @@ const actionOptions = [
   "auth.login_failed",
   "auth.password_changed",
   "product.create",
+  "product.update",
   "product.enable",
   "product.disable",
   "product.delete",
+  "product.archive",
   "shop.create",
   "inventory.inbound",
   "inventory.sales_outbound",
@@ -42,9 +45,11 @@ export default function AuditLogsPage() {
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(initialPagination);
 
   const params = useMemo(() => {
-    const query = new URLSearchParams();
+    const query = new URLSearchParams({ page: String(page) });
     if (actorID) query.set("actor_id", actorID);
     if (action) query.set("action", action);
     if (resourceType) query.set("resource_type", resourceType);
@@ -52,24 +57,26 @@ export default function AuditLogsPage() {
     if (from) query.set("from", from);
     if (to) query.set("to", to);
     return query.toString();
-  }, [action, actorID, from, resourceID, resourceType, to]);
+  }, [action, actorID, from, page, resourceID, resourceType, to]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const [auditList, userList] = await Promise.all([
-        apiGet<{ items: AuditLog[] }>(`/audit-logs${params ? `?${params}` : ""}`),
-        apiGet<{ items: User[] }>("/users"),
+        apiGet<Paginated<AuditLog>>(`/audit-logs?${params}`),
+        apiGet<Paginated<User>>("/users?all=true"),
       ]);
       setLogs(auditList.items);
+      setPagination(auditList.pagination);
       setUsers(userList.items);
+      if (auditList.pagination.page !== page) setPage(auditList.pagination.page);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [params]);
+  }, [page, params]);
 
   useEffect(() => {
     void load();
@@ -82,6 +89,7 @@ export default function AuditLogsPage() {
     setResourceID("");
     setFrom("");
     setTo("");
+    setPage(1);
   }
 
   return (
@@ -89,31 +97,31 @@ export default function AuditLogsPage() {
       <PageHeader title="操作记录" description="按人员、动作、对象和时间查询后台操作审计。" />
       <div className="grid gap-3 rounded-lg border border-[var(--border-subtle)] bg-white p-3 md:grid-cols-3 xl:grid-cols-6">
         <Field label="人员">
-          <Select value={actorID} onChange={(event) => setActorID(event.target.value)}>
+          <Select value={actorID} onChange={(event) => { setActorID(event.target.value); setPage(1); }}>
             <option value="">全部</option>
             {users.map((user) => <option key={user.id} value={user.id}>{user.name || user.email}</option>)}
           </Select>
         </Field>
         <Field label="动作">
-          <Select value={action} onChange={(event) => setAction(event.target.value)}>
+          <Select value={action} onChange={(event) => { setAction(event.target.value); setPage(1); }}>
             <option value="">全部</option>
             {actionOptions.map((item) => <option key={item} value={item}>{auditActionLabel(item)}</option>)}
           </Select>
         </Field>
         <Field label="对象">
-          <Select value={resourceType} onChange={(event) => setResourceType(event.target.value)}>
+          <Select value={resourceType} onChange={(event) => { setResourceType(event.target.value); setPage(1); }}>
             <option value="">全部</option>
             {resourceOptions.map((item) => <option key={item} value={item}>{auditResourceLabel(item)}</option>)}
           </Select>
         </Field>
         <Field label="对象 ID">
-          <Input value={resourceID} onChange={(event) => setResourceID(event.target.value)} placeholder="精确匹配" />
+          <Input value={resourceID} onChange={(event) => { setResourceID(event.target.value); setPage(1); }} placeholder="精确匹配" />
         </Field>
         <Field label="开始日期">
-          <Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+          <Input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} />
         </Field>
         <Field label="结束日期">
-          <Input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+          <Input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} />
         </Field>
         <div className="flex items-end gap-2 md:col-span-3 xl:col-span-6">
           <Button type="button" variant="secondary" onClick={load}><Search className="h-4 w-4" />查询</Button>
@@ -121,6 +129,7 @@ export default function AuditLogsPage() {
         </div>
       </div>
       {loading ? <LoadingBlock label="加载操作记录" /> : error ? <ErrorBlock message={error} onRetry={load} /> : <AuditTable logs={logs} />}
+      <Pagination meta={pagination} onPageChange={setPage} />
     </div>
   );
 }

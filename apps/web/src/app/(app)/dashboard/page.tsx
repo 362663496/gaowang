@@ -26,8 +26,8 @@ export default function DashboardPage() {
     setError("");
     try {
       const [inventory, movements, report] = await Promise.all([
-        apiGet<{ items: InventorySnapshot[] }>("/inventory"),
-        apiGet<{ items: StockMovement[] }>("/stock-movements"),
+        apiGet<{ items: InventorySnapshot[] }>("/inventory?all=true"),
+        apiGet<{ items: StockMovement[] }>("/stock-movements?page_size=8"),
         apiGet<{ summary: SalesSummary }>("/reports/sales-summary"),
       ]);
       setData({ inventory: inventory.items, movements: movements.items, summary: report.summary });

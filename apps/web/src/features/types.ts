@@ -1,5 +1,17 @@
 import type { Role } from "@/lib/api";
 
+export type PaginationMeta = {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+};
+
+export type Paginated<T> = {
+  items: T[];
+  pagination: PaginationMeta;
+};
+
 export type Product = {
   ID: string;
   Name: string;
@@ -10,6 +22,7 @@ export type Product = {
   LowStockThreshold: number;
   Note: string;
   Enabled: boolean;
+  ArchivedAt: string | null;
   CreatedAt: string;
   UpdatedAt: string;
 };
@@ -71,6 +84,7 @@ export type ProductRankingRow = {
   product_id: string;
   product_name: string;
   product_code: string;
+  archived: boolean;
   revenue_cents: number;
   cost_cents: number;
   gross_profit_cents: number;

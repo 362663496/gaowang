@@ -14,7 +14,7 @@ type MovementHandler struct {
 
 func (h MovementHandler) List(c *gin.Context) {
 	var items []models.StockMovement
-	query := h.DB.Preload("Product").Preload("Shop").Preload("Operator").Order("created_at desc").Limit(100)
+	query := h.DB.Model(&models.StockMovement{})
 	if movementType := c.Query("type"); movementType != "" {
 		query = query.Where("type = ?", movementType)
 	}
@@ -24,9 +24,14 @@ func (h MovementHandler) List(c *gin.Context) {
 	if shopID := c.Query("shop_id"); shopID != "" {
 		query = query.Where("shop_id = ?", shopID)
 	}
-	if err := query.Find(&items).Error; err != nil {
+	query, meta, err := paginate(c, query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to count movements")
+		return
+	}
+	if err := query.Preload("Product").Preload("Shop").Preload("Operator").Order("created_at desc").Find(&items).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to list movements")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	writePage(c, items, meta)
 }

@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { apiDeleteSession, devSessionEvent, readDevSession, type Role } from "@/lib/api";
+import { apiDeleteSession, devSessionEvent, readDevSession, type DevSession, type Role } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -39,7 +39,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [session, setSession] = useState(readDevSession);
+  const [session, setSession] = useState<DevSession | null>(null);
 
   useEffect(() => {
     const update = () => setSession(readDevSession());
@@ -53,17 +53,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!session.userId) {
+    if (session && !session.userId) {
       router.replace("/login");
     }
-  }, [router, session.userId]);
+  }, [router, session]);
 
   function logout() {
     apiDeleteSession();
     router.replace("/login");
   }
 
-  if (!session.userId) {
+  if (!session?.userId) {
     return <main className="min-h-dvh bg-[var(--surface-page)]" />;
   }
 

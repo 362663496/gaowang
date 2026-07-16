@@ -19,11 +19,16 @@ type createShopRequest struct {
 
 func (h ShopHandler) List(c *gin.Context) {
 	var shops []models.Shop
-	if err := h.DB.Order("created_at desc").Find(&shops).Error; err != nil {
+	query, meta, err := paginate(c, h.DB.Model(&models.Shop{}))
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to count shops")
+		return
+	}
+	if err := query.Order("created_at desc").Find(&shops).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to list shops")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": shops})
+	writePage(c, shops, meta)
 }
 
 func (h ShopHandler) Create(c *gin.Context) {

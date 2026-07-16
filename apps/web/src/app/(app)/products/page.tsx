@@ -1,21 +1,25 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import Image from "next/image";
-import { ImageIcon, Plus, Power, Search, Trash2 } from "lucide-react";
+import { ImageIcon, Pencil, Plus, Power, Search, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/fields";
 import { MessageBar } from "@/components/ui/message";
+import { initialPagination, Pagination } from "@/components/ui/pagination";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
-import type { Product } from "@/features/types";
+import type { Paginated, Product } from "@/features/types";
 import { useMessage } from "@/features/use-message";
 import { apiGet, apiPost, request } from "@/lib/api";
-import { formatMoney, formatQuantity, yuanToCents } from "@/lib/format";
+import { centsToYuanInput, formatMoney, formatQuantity, yuanToCents } from "@/lib/format";
 
 type ProductAction = { productID: string; type: "status" | "delete" } | null;
+type ProductListResponse = Paginated<Product> & {
+  summary: { total: number; enabled: number; default_sale_cents: number };
+};
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -24,7 +28,11 @@ export default function ProductsPage() {
   const [actionError, setActionError] = useState("");
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
   const [busyAction, setBusyAction] = useState<ProductAction>(null);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(initialPagination);
+  const [summary, setSummary] = useState({ total: 0, enabled: 0, default_sale_cents: 0 });
   const { message, show } = useMessage();
 
   const load = useCallback(async () => {
@@ -32,20 +40,23 @@ export default function ProductsPage() {
     setError("");
     setActionError("");
     try {
-      const data = await apiGet<{ items: Product[] }>(`/products${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+      const params = new URLSearchParams({ page: String(page) });
+      if (query) params.set("q", query);
+      const data = await apiGet<ProductListResponse>(`/products?${params}`);
       setProducts(data.items);
+      setPagination(data.pagination);
+      setSummary(data.summary);
+      if (data.pagination.page !== page) setPage(data.pagination.page);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [page, query]);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  const totalValue = useMemo(() => products.reduce((sum, item) => sum + item.DefaultSaleCents, 0), [products]);
 
   async function setProductEnabled(product: Product) {
     setBusyAction({ productID: product.ID, type: "status" });
@@ -57,6 +68,7 @@ export default function ProductsPage() {
         body: JSON.stringify({ enabled: !product.Enabled }),
       });
       setProducts((current) => current.map((item) => item.ID === product.ID ? data.item : item));
+      setSummary((current) => ({ ...current, enabled: current.enabled + (data.item.Enabled ? 1 : -1) }));
       show(data.item.Enabled ? "商品已启用" : "商品已禁用");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "更新商品状态失败");
@@ -66,15 +78,15 @@ export default function ProductsPage() {
   }
 
   async function deleteProduct(product: Product) {
-    if (!window.confirm(`确定删除商品“${product.Name}”吗？此操作无法撤销。`)) {
+    if (!window.confirm(`确定删除商品“${product.Name}”吗？未使用商品会彻底删除，有历史的零库存商品会归档。`)) {
       return;
     }
     setBusyAction({ productID: product.ID, type: "delete" });
     setActionError("");
     try {
       await request<void>(`/products/${product.ID}`, { method: "DELETE" });
-      setProducts((current) => current.filter((item) => item.ID !== product.ID));
       show("商品已删除");
+      void load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "删除商品失败");
     } finally {
@@ -94,10 +106,11 @@ export default function ProductsPage() {
             </DialogTrigger>
             <DialogContent title="新增商品">
               <ProductForm
-                onCreated={() => {
+                onSaved={() => {
                   setOpen(false);
                   show("商品已创建");
-                  void load();
+                  if (page === 1) void load();
+                  else setPage(1);
                 }}
               />
             </DialogContent>
@@ -106,26 +119,41 @@ export default function ProductsPage() {
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Summary label="商品数" value={formatQuantity(products.length)} />
-        <Summary label="默认售价合计" value={formatMoney(totalValue)} />
-        <Summary label="已启用" value={formatQuantity(products.filter((p) => p.Enabled).length)} />
+        <Summary label="商品数" value={formatQuantity(summary.total)} />
+        <Summary label="默认售价合计" value={formatMoney(summary.default_sale_cents)} />
+        <Summary label="已启用" value={formatQuantity(summary.enabled)} />
       </div>
 
       <div className="flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-white p-2">
         <Search className="ml-2 h-4 w-4 text-[var(--text-muted)]" />
-        <Input className="border-0 shadow-none focus:ring-0" placeholder="搜索商品名称或编码" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Input className="border-0 shadow-none focus:ring-0" placeholder="搜索商品名称或编码" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
       </div>
 
-      {actionError ? <ErrorBlock message={actionError} /> : null}
       {loading ? <LoadingBlock label="加载商品" /> : error ? <ErrorBlock message={error} onRetry={load} /> : (
-        <ProductsTable busyAction={busyAction} onDelete={deleteProduct} onSetEnabled={setProductEnabled} products={products} />
+        <ProductsTable busyAction={busyAction} onDelete={deleteProduct} onEdit={setEditing} onSetEnabled={setProductEnabled} products={products} />
       )}
-      <MessageBar message={message} />
+      <Pagination meta={pagination} onPageChange={setPage} />
+      <Dialog open={editing !== null} onOpenChange={(value) => !value && setEditing(null)}>
+        <DialogContent title="修改商品">
+          {editing ? (
+            <ProductForm
+              key={editing.ID}
+              product={editing}
+              onSaved={() => {
+                setEditing(null);
+                show("商品已修改");
+                void load();
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+      <MessageBar message={actionError || message} tone={actionError ? "error" : "success"} />
     </div>
   );
 }
 
-function ProductForm({ onCreated }: { onCreated: () => void }) {
+function ProductForm({ product, onSaved }: { product?: Product; onSaved: (product: Product) => void }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -140,8 +168,10 @@ function ProductForm({ onCreated }: { onCreated: () => void }) {
     form.delete("sale_yuan");
     if ((form.get("image") as File)?.size === 0) form.delete("image");
     try {
-      await apiPost<{ item: Product }>("/products", form);
-      onCreated();
+      const data = product
+        ? await request<{ item: Product }>(`/products/${product.ID}`, { method: "PATCH", body: form })
+        : await apiPost<{ item: Product }>("/products", form);
+      onSaved(data.item);
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
     } finally {
@@ -153,14 +183,14 @@ function ProductForm({ onCreated }: { onCreated: () => void }) {
     <form className="grid gap-4" onSubmit={submit}>
       {error ? <ErrorBlock message={error} /> : null}
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="商品名称"><Input name="name" required /></Field>
-        <Field label="商品编码"><Input name="code" required /></Field>
-        <Field label="默认进货价（元）"><Input min="0" name="purchase_yuan" step="0.01" type="number" /></Field>
-        <Field label="默认销售价（元）"><Input min="0" name="sale_yuan" step="0.01" type="number" /></Field>
-        <Field label="低库存阈值"><Input min="0" name="low_stock_threshold" type="number" /></Field>
-        <Field label="商品图片"><Input accept=".jpg,.jpeg,.png,.webp" name="image" type="file" /></Field>
+        <Field label="商品名称"><Input defaultValue={product?.Name} name="name" required /></Field>
+        <Field label="商品编码"><Input defaultValue={product?.Code} name="code" required /></Field>
+        <Field label="默认进货价（元）"><Input defaultValue={centsToYuanInput(product?.DefaultPurchaseCents ?? 0)} min="0" name="purchase_yuan" step="0.01" type="number" /></Field>
+        <Field label="默认销售价（元）"><Input defaultValue={centsToYuanInput(product?.DefaultSaleCents ?? 0)} min="0" name="sale_yuan" step="0.01" type="number" /></Field>
+        <Field label="低库存阈值"><Input defaultValue={product?.LowStockThreshold} min="0" name="low_stock_threshold" type="number" /></Field>
+        <Field label={product ? "替换商品图片（可选）" : "商品图片"}><Input accept=".jpg,.jpeg,.png,.webp" name="image" type="file" /></Field>
       </div>
-      <Field label="备注"><Textarea name="note" /></Field>
+      <Field label="备注"><Textarea defaultValue={product?.Note} name="note" /></Field>
       <div className="flex justify-end gap-2">
         <DialogClose asChild><Button type="button" variant="secondary">取消</Button></DialogClose>
         <Button loading={saving} type="submit">保存商品</Button>
@@ -169,9 +199,10 @@ function ProductForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-function ProductsTable({ busyAction, onDelete, onSetEnabled, products }: {
+function ProductsTable({ busyAction, onDelete, onEdit, onSetEnabled, products }: {
   busyAction: ProductAction;
   onDelete: (product: Product) => void;
+  onEdit: (product: Product) => void;
   onSetEnabled: (product: Product) => void;
   products: Product[];
 }) {
@@ -182,7 +213,7 @@ function ProductsTable({ busyAction, onDelete, onSetEnabled, products }: {
   return (
     <>
       <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-white">
-        <table className="w-full min-w-[1020px] text-left text-sm">
+        <table className="w-full min-w-[1120px] text-left text-sm">
           <thead className="border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
             <tr>
               <th className="px-4 py-3 font-medium">商品</th>
@@ -213,6 +244,9 @@ function ProductsTable({ busyAction, onDelete, onSetEnabled, products }: {
                 <td className="px-4 py-3"><Badge tone={product.Enabled ? "success" : "error"}>{product.Enabled ? "启用" : "禁用"}</Badge></td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1">
+                    <Button disabled={busyAction !== null} size="sm" type="button" variant="secondary" onClick={() => onEdit(product)}>
+                      <Pencil className="h-3.5 w-3.5" />修改
+                    </Button>
                     <Button
                       disabled={busyAction !== null}
                       loading={busyAction?.productID === product.ID && busyAction.type === "status"}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
+import { Badge } from "@/components/ui/badge";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
 import type { InventorySnapshot, ProductRankingRow, SalesSummary, SalesTrendRow, ShopRankingRow } from "@/features/types";
 import { apiGet } from "@/lib/api";
@@ -25,7 +26,7 @@ export default function ReportsPage() {
         apiGet<{ items: SalesTrendRow[] }>("/reports/sales-trend"),
         apiGet<{ items: ProductRankingRow[] }>("/reports/product-ranking"),
         apiGet<{ items: ShopRankingRow[] }>("/reports/shop-ranking"),
-        apiGet<{ items: InventorySnapshot[] }>("/inventory"),
+        apiGet<{ items: InventorySnapshot[] }>("/inventory?all=true"),
       ]);
       setSummary(report.summary);
       setTrend(salesTrend.items);
@@ -62,7 +63,7 @@ export default function ReportsPage() {
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <TrendPanel rows={trend} />
-        <RankingPanel title="商品销售排行" rows={products.map((item) => ({ id: item.product_id, label: item.product_name, sublabel: item.product_code, revenue: item.revenue_cents, quantity: item.quantity_sold, gross: item.gross_profit_cents }))} />
+        <RankingPanel title="商品销售排行" rows={products.map((item) => ({ id: item.product_id, label: item.product_name, sublabel: item.product_code, archived: item.archived, revenue: item.revenue_cents, quantity: item.quantity_sold, gross: item.gross_profit_cents }))} />
       </div>
       <RankingPanel title="店铺销售排行" rows={shops.map((item) => ({ id: item.shop_id, label: item.shop_name, revenue: item.revenue_cents, quantity: item.quantity_sold, gross: item.gross_profit_cents }))} />
       <section className="rounded-lg border border-[var(--border-subtle)] bg-white">
@@ -127,6 +128,7 @@ type RankingItem = {
   id: string;
   label: string;
   sublabel?: string;
+  archived?: boolean;
   revenue: number;
   quantity: number;
   gross: number;
@@ -145,7 +147,10 @@ function RankingPanel({ title, rows }: { title: string; rows: RankingItem[] }) {
             <div className="grid gap-2 px-4 py-3" key={row.id}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate font-medium">{index + 1}. {row.label}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-medium">{index + 1}. {row.label}</span>
+                    {row.archived ? <Badge>已归档</Badge> : null}
+                  </div>
                   {row.sublabel ? <div className="text-xs text-[var(--text-secondary)]">{row.sublabel}</div> : null}
                 </div>
                 <div className="shrink-0 text-right">

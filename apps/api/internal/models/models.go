@@ -70,7 +70,8 @@ type Product struct {
 	DefaultSaleCents     int64 `gorm:"not null;default:0"`
 	LowStockThreshold    int64 `gorm:"not null;default:0"`
 	Note                 string
-	Enabled              bool `gorm:"not null;default:true"`
+	Enabled              bool       `gorm:"not null;default:true"`
+	ArchivedAt           *time.Time `gorm:"index"`
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 }
