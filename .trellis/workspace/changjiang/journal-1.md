@@ -71,3 +71,38 @@ Initialized Trellis, populated backend and frontend project specs, and passed th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: 完成商品库存工作流与 Ant Design 前端升级
+
+**Date**: 2026-07-17
+**Task**: 完成商品库存工作流与 Ant Design 前端升级
+**Branch**: `master`
+
+### Summary
+
+完成商品生命周期、库存操作、分页与商品修改，并将全部前端迁移到 Ant Design 6；通过全量质量门和桌面/移动浏览器验收，已原子发布 aliyun release 20260717003439。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a077db7` | (see git log) |
+| `4b3a75d` | (see git log) |
+| `ae21cec` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
