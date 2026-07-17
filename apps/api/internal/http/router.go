@@ -36,7 +36,7 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 	authHandler := handlers.AuthHandler{DB: database}
 	productHandler := handlers.ProductHandler{DB: database, Cfg: cfg}
 	shopHandler := handlers.ShopHandler{DB: database}
-	inventoryHandler := handlers.InventoryHandler{DB: database}
+	inventoryHandler := handlers.InventoryHandler{DB: database, Cfg: cfg}
 	movementHandler := handlers.MovementHandler{DB: database}
 	reportHandler := handlers.ReportHandler{DB: database}
 
@@ -49,6 +49,7 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 	group.GET("/shops", shopHandler.List)
 	group.POST("/shops", shopHandler.Create)
 	group.GET("/inventory", inventoryHandler.ListCurrent)
+	group.GET("/inventory/export", inventoryHandler.ExportCurrent)
 	group.POST("/inventory/inbound", inventoryHandler.CreateInbound)
 	group.POST("/inventory/sales-outbound", inventoryHandler.CreateSalesOutbound)
 	group.POST("/inventory/adjustments", inventoryHandler.CreateAdjustment)

@@ -3,9 +3,12 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
+	"gaowang/apps/api/internal/config"
 	"gaowang/apps/api/internal/models"
 	"gaowang/apps/api/internal/services"
 	"github.com/gin-gonic/gin"
@@ -14,7 +17,8 @@ import (
 )
 
 type InventoryHandler struct {
-	DB *gorm.DB
+	DB  *gorm.DB
+	Cfg config.Config
 }
 
 type inboundRequest struct {
@@ -39,12 +43,7 @@ type adjustmentRequest struct {
 
 func (h InventoryHandler) ListCurrent(c *gin.Context) {
 	var items []models.InventorySnapshot
-	base := h.DB.Model(&models.InventorySnapshot{}).
-		Joins("JOIN products ON products.id = inventory_snapshots.product_id").
-		Where("products.archived_at IS NULL")
-	if c.Query("low_stock") == "true" {
-		base = base.Where("products.low_stock_threshold > 0 AND inventory_snapshots.quantity <= products.low_stock_threshold")
-	}
+	base := h.activeInventoryQuery(c.Query("low_stock") == "true")
 	query, meta, err := paginate(c, base)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to count inventory")
@@ -58,6 +57,35 @@ func (h InventoryHandler) ListCurrent(c *gin.Context) {
 		return
 	}
 	writePage(c, items, meta)
+}
+
+func (h InventoryHandler) ExportCurrent(c *gin.Context) {
+	var items []models.InventorySnapshot
+	if err := h.activeInventoryQuery(c.Query("low_stock") == "true").
+		Preload("Product").
+		Order("inventory_snapshots.updated_at desc").
+		Find(&items).Error; err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to export inventory")
+		return
+	}
+	data, err := services.BuildInventoryWorkbook(items, h.Cfg.UploadDir)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to build inventory workbook")
+		return
+	}
+	filename := fmt.Sprintf("inventory-%s.xlsx", time.Now().Format("2006-01-02"))
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data)
+}
+
+func (h InventoryHandler) activeInventoryQuery(lowStock bool) *gorm.DB {
+	base := h.DB.Model(&models.InventorySnapshot{}).
+		Joins("JOIN products ON products.id = inventory_snapshots.product_id").
+		Where("products.archived_at IS NULL")
+	if lowStock {
+		base = base.Where("products.low_stock_threshold > 0 AND inventory_snapshots.quantity <= products.low_stock_threshold")
+	}
+	return base
 }
 
 func (h InventoryHandler) CreateInbound(c *gin.Context) {

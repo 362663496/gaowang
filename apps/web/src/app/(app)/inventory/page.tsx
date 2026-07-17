@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { ImageIcon } from "lucide-react";
+import { Download, ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { InventoryActions } from "@/features/inventory/action-forms";
 import { StockBadge } from "@/features/labels";
 import type { InventorySnapshot, Paginated, Product, Shop } from "@/features/types";
 import { useMessage } from "@/features/use-message";
-import { apiGet } from "@/lib/api";
+import { apiDownload, apiGet } from "@/lib/api";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 
 export default function InventoryPage() {
@@ -23,6 +23,8 @@ export default function InventoryPage() {
   const [shops, setShops] = useState<Shop[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [showLowStock, setShowLowStock] = useState(false);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(initialPagination);
@@ -64,8 +66,26 @@ export default function InventoryPage() {
   );
 
   function done(value: string) {
+    setExportError("");
     show(value);
     void load();
+  }
+
+  async function exportExcel() {
+    setExporting(true);
+    setExportError("");
+    try {
+      const params = new URLSearchParams();
+      if (showLowStock) params.set("low_stock", "true");
+      const query = params.toString();
+      const today = new Date().toISOString().slice(0, 10);
+      await apiDownload(`/inventory/export${query ? `?${query}` : ""}`, `inventory-${today}.xlsx`);
+      show("导出成功");
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -73,7 +93,15 @@ export default function InventoryPage() {
       <PageHeader
         title="当前库存"
         description="库存快照由入库、销售出库和调整流水自动更新。"
-        actions={<InventoryActions inventory={inventory} products={products} shops={shops} onDone={done} />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button loading={exporting} type="button" variant="secondary" onClick={() => void exportExcel()}>
+              <Download className="h-4 w-4" />
+              导出 Excel
+            </Button>
+            <InventoryActions inventory={inventory} products={products} shops={shops} onDone={done} />
+          </div>
+        }
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -90,7 +118,7 @@ export default function InventoryPage() {
       ) : null}
       {loading ? <LoadingBlock label="加载库存" /> : error ? <ErrorBlock message={error} onRetry={load} /> : <InventoryTable inventory={visibleInventory} />}
       <Pagination meta={pagination} onPageChange={setPage} />
-      <MessageBar message={message} />
+      <MessageBar message={exportError || message} tone={exportError ? "error" : "success"} />
     </div>
   );
 }
