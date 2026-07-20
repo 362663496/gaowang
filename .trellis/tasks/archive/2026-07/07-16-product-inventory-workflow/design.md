@@ -5,7 +5,7 @@
 - 库存快照继续按商品全局汇总；店铺只作为流水属性，不新增门店库存、调拨或门店成本。
 - 库存流水不可修改或级联删除；商品归档不得改变历史销售额、成本、毛利和排行。
 - 归档商品禁止新的入库、出库和调整；禁用商品沿用现有规则，不在本任务改变其语义。
-- 复用现有 Gin、GORM、React 本地状态、原生 `datalist` 和 UI primitives；允许框架但本次现有能力已覆盖，不新增依赖或迁移整套 UI。
+- 复用现有 Gin、GORM、React 本地状态和 API 客户端；前端整体迁移到 Ant Design 6，不保留原生 `datalist`、Radix/Tailwind UI primitives 或第二套组件基础设施。
 
 ## Product archive model
 
@@ -38,7 +38,7 @@
 - 删除事务与库存事务都先锁定商品行，再锁定库存快照，避免删除检查与并发入库/调整之间产生归档后新增库存的竞态。
 - 在 `InventoryService` 的三个写入口共用一个“锁定并确认商品未归档”检查；归档商品返回可识别错误并映射为 `409 PRODUCT_ARCHIVED`。
 - 数据库现有 `OnDelete:RESTRICT` 继续作为硬删除的最终保护。
-- 前端保留原生二次确认。失败时读取现有 JSON error envelope，把服务端 `message` 作为固定错误提示展示；失败不触发 reload，也不改变本地商品列表。
+- 前端使用 Ant Design `Modal.confirm` 二次确认。失败时读取现有 JSON error envelope，把服务端 `message` 作为固定错误提示展示；失败不触发 reload，也不改变本地商品列表。
 - 操作记录新增 `product.archive` 显示标签；硬删除继续使用 `product.delete`。
 
 ## Optional inbound shop
@@ -58,9 +58,19 @@
 
 ### Product search
 
-- 三个库存表单和流水筛选共用一个基于原生 `input[list]`/`datalist` 的 `ProductCombobox`，把搜索与选择合并为单个控件。
-- 选项值显示 `名称 · 编码`；共享匹配函数支持名称、编码和完整标签，流水页归档选项追加“已归档”。
-- 搜索和选择状态保持页面/表单本地；不增加远程搜索、缓存或组合框依赖。
+- 三个库存表单和流水筛选共用一个 Ant Design `Select` 商品组件，把搜索与选择合并为单个控件。
+- 选项显示 `名称 · 编码`；`showSearch` 按名称和编码做不区分大小写的本地过滤，流水页归档选项追加“已归档”。
+- 搜索和选择状态保持页面/表单本地；不增加远程搜索或缓存。
+
+## Ant Design frontend platform
+
+- 使用 Ant Design 6.5.1、`@ant-design/icons` 与 `@ant-design/nextjs-registry`。根布局由 `AntdRegistry` 注入 App Router 首屏样式，客户端 Provider 统一挂载中文 locale、`ConfigProvider` 主题和 `App` 消息上下文。
+- 应用外壳使用 `Layout`、`Sider`、`Menu`、`Header` 和移动端 `Drawer`；导航项及管理员可见性沿用现有规则。
+- 六个管理列表使用 `Table` 的 `pagination` 配置直连服务端 `PaginationMeta`；筛选变化仍回到第一页，页面大小保持 20，不增加客户端假分页。
+- 业务表单使用 `Form`、`Input`、`InputNumber`、`Select`、`Upload` 和 `Modal`；表单内用 `Alert` 固定展示服务端错误，操作结果用 `App.useApp().message`。
+- 商品和流水缩略图使用 Ant Design `Image`，无图使用框架 `Avatar`/图标占位；状态统一使用 `Tag`，加载、空数据和页面错误使用 `Spin`、`Empty`、`Alert`/`Result`。
+- CSS 只保留页面网格、外壳尺寸和报表条形图等框架未提供的布局样式，视觉以 `#5e6ad2` 主色和紧凑 B2B 后台密度为准。
+- 迁移完成后删除旧 `components/ui/*`、`use-message`、原生商品组合框及 Radix、Lucide、Tailwind、class variance/merge 依赖。
 
 ## Pagination contract
 
@@ -78,7 +88,7 @@
 
 ### Movement and report labels
 
-- 流水商品单元格复用库存页的 40px `next/image`/`ImageIcon` 展示规则，并在归档商品名称旁显示状态徽标。
+- 流水商品单元格复用库存页的 40px Ant Design `Image`/`Avatar` 展示规则，并在归档商品名称旁显示状态徽标；图片文件缺失时也降级为占位图标。
 - 商品排行读取新增的 `archived` 字段并标注“已归档”；金额与排序仍来自全部历史流水。
 - 仪表盘最近流水不增加图片，但仍能通过历史关联显示归档商品名称。
 
@@ -95,5 +105,5 @@
 - 路由/服务测试覆盖硬删除、零库存归档、有库存拒绝、归档后库存写入拒绝、默认/包含归档列表和运营库存过滤。
 - 入库测试覆盖有店铺与无店铺两种流水，并确认全局库存计算不变。
 - 报表测试覆盖归档前后历史汇总与排行不丢失、`archived` 标记正确。
-- 前端用最小纯函数测试覆盖名称/编码/大小写匹配；真实浏览器验证低库存切换、四处搜索、错误提示、流水图片和归档标签。
+- 前端保留最小商品选项纯函数测试；真实浏览器验证 Ant Design 外壳、服务端分页、低库存切换、四处搜索、错误提示、流水图片、归档标签和移动导航。
 - 分页路由测试覆盖页码、总数、`all=true` 和筛选；商品路由测试覆盖字段修改、保留/替换图片和审计。

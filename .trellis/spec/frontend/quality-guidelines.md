@@ -36,12 +36,12 @@ ESLint uses Next.js core-web-vitals and TypeScript rules. The project explicitly
 - API calls go through `lib/api.ts`; 401/403 behavior and the structured error shape remain centralized.
 - API response field names and union values match the backend.
 - Money conversion stays at the input/display edge and API values remain cents.
-- New UI reuses existing primitives before adding another component or dependency.
+- New UI uses installed Ant Design components before adding another component or dependency; shared wrappers must provide domain behavior or page framing.
 - Effects have accurate dependencies and cleanup where needed.
 - A mutation refreshes the relevant server state and cannot double-submit.
 
 ## Avoid
 
-- New dependencies for behavior already covered by React, browser controls, Tailwind, Radix, or installed utilities.
+- New dependencies for behavior already covered by React or Ant Design.
 - Snapshot-heavy or tautological tests that cannot fail when the behavior breaks.
 - Generic form/table abstractions before two real consumers share the same behavior.

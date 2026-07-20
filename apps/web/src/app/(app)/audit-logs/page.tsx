@@ -1,13 +1,11 @@
 "use client";
 
+import { ClearOutlined, SearchOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Flex, Form, Input, Row, Select, Space, Table, Tooltip, type TableProps } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, X } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/fields";
-import { initialPagination, Pagination } from "@/components/ui/pagination";
-import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
 import { AuditActionBadge, auditActionLabel, auditResourceLabel } from "@/features/labels";
+import { initialPagination, tablePagination } from "@/features/pagination";
 import type { AuditLog, Paginated, User } from "@/features/types";
 import { apiGet } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -92,91 +90,112 @@ export default function AuditLogsPage() {
     setPage(1);
   }
 
-  return (
-    <div className="space-y-5">
-      <PageHeader title="操作记录" description="按人员、动作、对象和时间查询后台操作审计。" />
-      <div className="grid gap-3 rounded-lg border border-[var(--border-subtle)] bg-white p-3 md:grid-cols-3 xl:grid-cols-6">
-        <Field label="人员">
-          <Select value={actorID} onChange={(event) => { setActorID(event.target.value); setPage(1); }}>
-            <option value="">全部</option>
-            {users.map((user) => <option key={user.id} value={user.id}>{user.name || user.email}</option>)}
-          </Select>
-        </Field>
-        <Field label="动作">
-          <Select value={action} onChange={(event) => { setAction(event.target.value); setPage(1); }}>
-            <option value="">全部</option>
-            {actionOptions.map((item) => <option key={item} value={item}>{auditActionLabel(item)}</option>)}
-          </Select>
-        </Field>
-        <Field label="对象">
-          <Select value={resourceType} onChange={(event) => { setResourceType(event.target.value); setPage(1); }}>
-            <option value="">全部</option>
-            {resourceOptions.map((item) => <option key={item} value={item}>{auditResourceLabel(item)}</option>)}
-          </Select>
-        </Field>
-        <Field label="对象 ID">
-          <Input value={resourceID} onChange={(event) => { setResourceID(event.target.value); setPage(1); }} placeholder="精确匹配" />
-        </Field>
-        <Field label="开始日期">
-          <Input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} />
-        </Field>
-        <Field label="结束日期">
-          <Input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} />
-        </Field>
-        <div className="flex items-end gap-2 md:col-span-3 xl:col-span-6">
-          <Button type="button" variant="secondary" onClick={load}><Search className="h-4 w-4" />查询</Button>
-          <Button type="button" variant="ghost" onClick={resetFilters}><X className="h-4 w-4" />清空</Button>
+  const columns: TableProps<AuditLog>["columns"] = [
+    { title: "时间", dataIndex: "created_at", width: 180, render: (value: string) => <span className="muted">{formatDateTime(value)}</span> },
+    {
+      title: "人员",
+      dataIndex: "actor",
+      width: 190,
+      render: (actor: User | null) => (
+        <div>
+          <div className="product-cell-name">{actor?.name ?? "系统"}</div>
+          <div className="product-cell-note">{actor?.email ?? "-"}</div>
         </div>
-      </div>
-      {loading ? <LoadingBlock label="加载操作记录" /> : error ? <ErrorBlock message={error} onRetry={load} /> : <AuditTable logs={logs} />}
-      <Pagination meta={pagination} onPageChange={setPage} />
-    </div>
-  );
-}
+      ),
+    },
+    { title: "动作", dataIndex: "action", width: 150, render: (value: string) => <AuditActionBadge action={value} /> },
+    { title: "对象", dataIndex: "resource_type", width: 100, render: auditResourceLabel },
+    { title: "对象 ID", dataIndex: "resource_id", width: 180, ellipsis: true, render: (value: string) => <span className="mono">{value || "-"}</span> },
+    { title: "IP", dataIndex: "ip_address", width: 140, render: (value: string) => <span className="mono muted">{value || "-"}</span> },
+    {
+      title: "附加信息",
+      dataIndex: "metadata",
+      width: 260,
+      ellipsis: true,
+      render: (metadata: Record<string, string>) => {
+        const text = metadataText(metadata);
+        return <Tooltip title={text}><span className="muted">{text}</span></Tooltip>;
+      },
+    },
+  ];
 
-function AuditTable({ logs }: { logs: AuditLog[] }) {
-  if (logs.length === 0) {
-    return <EmptyBlock title="没有符合条件的操作记录" />;
-  }
   return (
-    <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-white">
-      <table className="w-full min-w-[1120px] text-left text-sm">
-        <thead className="border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
-          <tr>
-            <th className="px-4 py-3 font-medium">时间</th>
-            <th className="px-4 py-3 font-medium">人员</th>
-            <th className="px-4 py-3 font-medium">动作</th>
-            <th className="px-4 py-3 font-medium">对象</th>
-            <th className="px-4 py-3 font-medium">对象 ID</th>
-            <th className="px-4 py-3 font-medium">IP</th>
-            <th className="px-4 py-3 font-medium">附加信息</th>
-          </tr>
-        </thead>
-        <tbody>
-          {logs.map((log) => (
-            <tr className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-black/[0.02]" key={log.id}>
-              <td className="whitespace-nowrap px-4 py-3 text-[var(--text-secondary)]">{formatDateTime(log.created_at)}</td>
-              <td className="px-4 py-3">
-                <div className="font-medium">{log.actor?.name ?? "系统"}</div>
-                <div className="text-xs text-[var(--text-secondary)]">{log.actor?.email ?? "-"}</div>
-              </td>
-              <td className="px-4 py-3"><AuditActionBadge action={log.action} /></td>
-              <td className="px-4 py-3">{auditResourceLabel(log.resource_type)}</td>
-              <td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs">{log.resource_id || "-"}</td>
-              <td className="px-4 py-3 font-mono text-xs text-[var(--text-secondary)]">{log.ip_address || "-"}</td>
-              <td className="max-w-[260px] truncate px-4 py-3 text-xs text-[var(--text-secondary)]">{metadataText(log.metadata)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Flex gap={20} vertical>
+      <PageHeader description="按人员、动作、对象和时间查询后台操作审计。" title="操作记录" />
+      <Card className="filter-card">
+        <Form layout="vertical" requiredMark={false}>
+          <Row gutter={[14, 0]}>
+            <Col lg={4} md={8} sm={12} xs={24}>
+              <Form.Item label="人员">
+                <Select
+                  allowClear
+                  optionFilterProp="label"
+                  options={users.map((user) => ({ value: user.id, label: user.name || user.email }))}
+                  placeholder="全部人员"
+                  showSearch
+                  value={actorID || undefined}
+                  onChange={(value) => { setActorID(value ?? ""); setPage(1); }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={4} md={8} sm={12} xs={24}>
+              <Form.Item label="动作">
+                <Select
+                  allowClear
+                  optionFilterProp="label"
+                  options={actionOptions.map((item) => ({ value: item, label: auditActionLabel(item) }))}
+                  placeholder="全部动作"
+                  showSearch
+                  value={action || undefined}
+                  onChange={(value) => { setAction(value ?? ""); setPage(1); }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={4} md={8} sm={12} xs={24}>
+              <Form.Item label="对象">
+                <Select
+                  allowClear
+                  optionFilterProp="label"
+                  options={resourceOptions.map((item) => ({ value: item, label: auditResourceLabel(item) }))}
+                  placeholder="全部对象"
+                  showSearch
+                  value={resourceType || undefined}
+                  onChange={(value) => { setResourceType(value ?? ""); setPage(1); }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={4} md={8} sm={12} xs={24}>
+              <Form.Item label="对象 ID"><Input placeholder="精确匹配" value={resourceID} onChange={(event) => { setResourceID(event.target.value); setPage(1); }} /></Form.Item>
+            </Col>
+            <Col lg={4} md={8} sm={12} xs={24}>
+              <Form.Item label="开始日期"><Input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} /></Form.Item>
+            </Col>
+            <Col lg={4} md={8} sm={12} xs={24}>
+              <Form.Item label="结束日期"><Input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} /></Form.Item>
+            </Col>
+          </Row>
+          <Space>
+            <Button icon={<SearchOutlined />} onClick={() => void load()}>查询</Button>
+            <Button icon={<ClearOutlined />} type="text" onClick={resetFilters}>清空</Button>
+          </Space>
+        </Form>
+      </Card>
+      {error ? <Alert action={<Button size="small" onClick={() => void load()}>重试</Button>} message={error} showIcon type="error" /> : null}
+      <Card className="table-card">
+        <Table<AuditLog>
+          columns={columns}
+          dataSource={logs}
+          loading={loading}
+          pagination={tablePagination(pagination, setPage)}
+          rowKey="id"
+          scroll={{ x: 1220 }}
+        />
+      </Card>
+    </Flex>
   );
 }
 
 function metadataText(metadata: Record<string, string>): string {
   const pairs = Object.entries(metadata);
-  if (pairs.length === 0) {
-    return "-";
-  }
-  return pairs.map(([key, value]) => `${key}: ${value}`).join(" · ");
+  return pairs.length === 0 ? "-" : pairs.map(([key, value]) => `${key}: ${value}`).join(" · ");
 }

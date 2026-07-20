@@ -46,6 +46,8 @@ Use 4px spacing increments. Common section gaps are 16px, 20px, and 24px. Cards 
 
 Buttons, inputs, selects, dialogs, tables, badges, tabs, empty states, loading states, errors, disabled states, hover states, active states, and focus rings must be implemented consistently.
 
+Ant Design 6 is the implementation layer for these generic components. Theme it centrally through `AppProvider`; add project components only for inventory-domain behavior or shell/page framing, not a parallel primitive library.
+
 Buttons use icons when the action is a tool-like command. Text buttons are reserved for clear create, save, or submit actions. Focus states use an accent ring. Tables use row hover and compact status badges.
 
 Operational charts use compact bars and trend rows inside regular panels. They should share table density, use neutral rails with accent fills, and always include numeric labels so the chart is readable without interpreting color alone.

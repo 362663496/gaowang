@@ -1,32 +1,32 @@
-import { Badge } from "@/components/ui/badge";
+import { Tag } from "antd";
 import type { BackupJob, MovementType } from "@/features/types";
 
 export function MovementBadge({ type }: { type: MovementType }) {
   const map = {
-    inbound: { label: "入库", tone: "success" },
-    sales_outbound: { label: "销售出库", tone: "accent" },
-    adjustment: { label: "调整", tone: "warning" },
+    inbound: { label: "入库", tone: "green" },
+    sales_outbound: { label: "销售出库", tone: "geekblue" },
+    adjustment: { label: "调整", tone: "orange" },
   } as const;
-  return <Badge tone={map[type].tone}>{map[type].label}</Badge>;
+  return <Tag color={map[type].tone}>{map[type].label}</Tag>;
 }
 
 export function StockBadge({ quantity, threshold }: { quantity: number; threshold: number }) {
   if (quantity <= 0) {
-    return <Badge tone="error">无库存</Badge>;
+    return <Tag color="red">无库存</Tag>;
   }
   if (threshold > 0 && quantity <= threshold) {
-    return <Badge tone="warning">低库存</Badge>;
+    return <Tag color="orange">低库存</Tag>;
   }
-  return <Badge tone="success">正常</Badge>;
+  return <Tag color="green">正常</Tag>;
 }
 
 export function BackupStatusBadge({ status }: { status: BackupJob["Status"] }) {
   const map = {
-    running: { label: "运行中", tone: "warning" },
-    success: { label: "成功", tone: "success" },
-    failed: { label: "失败", tone: "error" },
+    running: { label: "运行中", tone: "orange" },
+    success: { label: "成功", tone: "green" },
+    failed: { label: "失败", tone: "red" },
   } as const;
-  return <Badge tone={map[status].tone}>{map[status].label}</Badge>;
+  return <Tag color={map[status].tone}>{map[status].label}</Tag>;
 }
 
 const auditActions: Record<string, string> = {
@@ -67,6 +67,6 @@ export function auditResourceLabel(resource: string): string {
 }
 
 export function AuditActionBadge({ action }: { action: string }) {
-  const tone = action.endsWith("failed") ? "error" : action.startsWith("inventory.") ? "accent" : "neutral";
-  return <Badge tone={tone}>{auditActionLabel(action)}</Badge>;
+  const color = action.endsWith("failed") ? "red" : action.startsWith("inventory.") ? "geekblue" : "default";
+  return <Tag color={color}>{auditActionLabel(action)}</Tag>;
 }

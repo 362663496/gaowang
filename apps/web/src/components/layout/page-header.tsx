@@ -1,3 +1,7 @@
+"use client";
+
+import { Flex, Typography } from "antd";
+
 export function PageHeader({
   title,
   description,
@@ -8,12 +12,12 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <Flex align="flex-end" className="page-header" gap={16} justify="space-between" wrap>
       <div>
-        <h1 className="text-2xl font-semibold leading-8">{title}</h1>
-        {description ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p> : null}
+        <Typography.Title level={2}>{title}</Typography.Title>
+        {description ? <Typography.Text type="secondary">{description}</Typography.Text> : null}
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-    </div>
+      {actions ? <Flex gap={8} wrap>{actions}</Flex> : null}
+    </Flex>
   );
 }

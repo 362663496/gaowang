@@ -53,6 +53,15 @@
 - [x] 商品页增加修改弹窗并复用创建表单；修改成功刷新当前页，失败展示服务端消息。
 - [x] 重新执行全量检查、浏览器验收和 aliyun 原子发布，确认分页、下拉搜索、商品修改及旧功能正常。
 
+## 7. Ant Design full frontend migration
+
+- [x] 安装 Ant Design 6、官方图标和 Next.js App Router registry，建立中文 Provider、统一主题 token 与响应式应用外壳。
+- [x] 把登录、仪表盘、商品、店铺、当前库存、流水、报表、审计、用户、设置和备份页面迁移到框架自带组件。
+- [x] 六个管理列表接入 Ant Design `Table` 服务端分页，四个商品入口切换为共享可搜索 `Select`。
+- [x] 商品新增/修改、库存操作、店铺/用户/设置表单使用 `Form` 与 `Modal`；删除确认、服务端错误和成功通知使用框架反馈组件。
+- [x] 删除旧 UI primitives、原生商品组合框、自制消息/分页/状态组件以及 Radix、Lucide、Tailwind 等无用依赖。
+- [x] 重新执行 Trellis 全量质量门、生产构建和桌面/移动浏览器验收；通过后更新项目规范并原子发布到 aliyun。
+
 ## Risk and rollback points
 
 - 商品归档与库存写入必须按相同“商品行 → 库存快照”顺序加锁，否则并发操作可能在归档后留下库存。

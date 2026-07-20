@@ -1,50 +1,40 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
-import { Field, Input } from "@/components/ui/fields";
-import { findProductByInput, productOptionLabel } from "@/features/product-options";
+import { Select } from "antd";
+import { productOptionLabel, productSearchText } from "@/features/product-options";
 import type { Product } from "@/features/types";
 
 export function ProductCombobox({
   products,
-  value,
-  onChange,
-  label = "商品",
+  value = "",
+  onChange = () => undefined,
   placeholder = "输入名称或编码选择商品",
-  required = false,
+  allowClear = false,
+  disabled = false,
 }: {
   products: Product[];
-  value: string;
-  onChange: (id: string) => void;
-  label?: string;
+  value?: string;
+  onChange?: (id: string) => void;
   placeholder?: string;
-  required?: boolean;
+  allowClear?: boolean;
+  disabled?: boolean;
 }) {
-  const listID = useId();
-  const selected = useMemo(() => products.find((product) => product.ID === value), [products, value]);
-  const [input, setInput] = useState("");
-
-  useEffect(() => {
-    setInput(selected ? productOptionLabel(selected) : "");
-  }, [selected]);
-
-  function update(next: string) {
-    setInput(next);
-    onChange(findProductByInput(products, next)?.ID ?? "");
-  }
-
-  function normalize() {
-    const match = findProductByInput(products, input);
-    setInput(match ? productOptionLabel(match) : selected ? productOptionLabel(selected) : "");
-    if (match) onChange(match.ID);
-  }
-
   return (
-    <Field label={label}>
-      <Input aria-autocomplete="list" list={listID} placeholder={placeholder} required={required} type="search" value={input} onBlur={normalize} onChange={(event) => update(event.target.value)} />
-      <datalist id={listID}>
-        {products.map((product) => <option key={product.ID} value={productOptionLabel(product)} />)}
-      </datalist>
-    </Field>
+    <Select
+      allowClear={allowClear}
+      disabled={disabled}
+      filterOption={(input, option) => String(option?.search ?? "").includes(input.trim().toLowerCase())}
+      notFoundContent="没有匹配商品"
+      optionFilterProp="search"
+      options={products.map((product) => ({
+        value: product.ID,
+        label: productOptionLabel(product),
+        search: productSearchText(product),
+      }))}
+      placeholder={placeholder}
+      showSearch
+      value={value || undefined}
+      onChange={(next) => onChange(next ?? "")}
+    />
   );
 }

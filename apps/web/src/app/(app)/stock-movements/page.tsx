@@ -1,15 +1,12 @@
 "use client";
 
+import { Alert, Button, Card, Col, Flex, Form, Row, Select, Table, Tag, type TableProps } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Image from "next/image";
-import { ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
-import { Badge } from "@/components/ui/badge";
-import { Field, Select } from "@/components/ui/fields";
-import { initialPagination, Pagination } from "@/components/ui/pagination";
-import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/ui/state";
 import { MovementBadge } from "@/features/labels";
+import { initialPagination, tablePagination } from "@/features/pagination";
 import { ProductCombobox } from "@/features/product-combobox";
+import { ProductImage } from "@/features/product-image";
 import type { MovementType, Paginated, Product, Shop, StockMovement } from "@/features/types";
 import { apiGet } from "@/lib/api";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
@@ -59,90 +56,103 @@ export default function StockMovementsPage() {
     void load();
   }, [load]);
 
-  return (
-    <div className="space-y-5">
-      <PageHeader title="流水记录" description="按类型、商品和店铺查看不可变库存流水。" />
-      <div className="grid gap-3 rounded-lg border border-[var(--border-subtle)] bg-white p-3 sm:grid-cols-2 xl:grid-cols-3">
-        <Field label="类型">
-          <Select value={type} onChange={(event) => { setType(event.target.value); setPage(1); }}>
-            <option value="">全部</option>
-            <option value="inbound">入库</option>
-            <option value="sales_outbound">销售出库</option>
-            <option value="adjustment">调整</option>
-          </Select>
-        </Field>
-        <ProductCombobox label="商品" placeholder="全部商品（输入名称或编码）" products={products} value={productID} onChange={(value) => { setProductID(value); setPage(1); }} />
-        <Field label="店铺">
-          <Select value={shopID} onChange={(event) => { setShopID(event.target.value); setPage(1); }}>
-            <option value="">全部</option>
-            {shops.map((shop) => <option key={shop.ID} value={shop.ID}>{shop.Name}</option>)}
-          </Select>
-        </Field>
-      </div>
-      {loading ? <LoadingBlock label="加载流水" /> : error ? <ErrorBlock message={error} onRetry={load} /> : <MovementTable movements={movements} />}
-      <Pagination meta={pagination} onPageChange={setPage} />
-    </div>
-  );
-}
+  const columns: TableProps<StockMovement>["columns"] = [
+    { title: "类型", dataIndex: "Type", width: 110, render: (value: MovementType) => <MovementBadge type={value} /> },
+    {
+      title: "商品",
+      dataIndex: "Product",
+      width: 280,
+      render: (product: Product | null) => <MovementProduct product={product} />,
+    },
+    { title: "店铺", dataIndex: ["Shop", "Name"], width: 130, render: (value?: string) => value ?? "-" },
+    { title: "数量", dataIndex: "QuantityDelta", width: 100, render: formatQuantity },
+    { title: "收入", dataIndex: "RevenueCents", width: 120, render: formatMoney },
+    {
+      title: "成本",
+      width: 120,
+      render: (_, movement) => formatMoney(movement.CostAmountCents || movement.PurchaseAmountCents),
+    },
+    { title: "毛利", dataIndex: "GrossProfitCents", width: 120, render: formatMoney },
+    { title: "备注", dataIndex: "Reason", width: 200, ellipsis: true, render: (value: string) => <span className="muted">{value || "-"}</span> },
+    { title: "时间", dataIndex: "CreatedAt", width: 180, render: (value: string) => <span className="muted">{formatDateTime(value)}</span> },
+  ];
 
-function MovementTable({ movements }: { movements: StockMovement[] }) {
-  if (movements.length === 0) {
-    return <EmptyBlock title="没有符合条件的流水" />;
-  }
   return (
-    <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-white">
-      <table className="w-full min-w-[1040px] text-left text-sm">
-        <thead className="border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
-          <tr>
-            <th className="px-4 py-3 font-medium">类型</th>
-            <th className="px-4 py-3 font-medium">商品</th>
-            <th className="px-4 py-3 font-medium">店铺</th>
-            <th className="px-4 py-3 font-medium">数量</th>
-            <th className="px-4 py-3 font-medium">收入</th>
-            <th className="px-4 py-3 font-medium">成本</th>
-            <th className="px-4 py-3 font-medium">毛利</th>
-            <th className="px-4 py-3 font-medium">备注</th>
-            <th className="px-4 py-3 font-medium">时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          {movements.map((movement) => (
-            <tr className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-black/[0.02]" key={movement.ID}>
-              <td className="px-4 py-3"><MovementBadge type={movement.Type as MovementType} /></td>
-              <td className="px-4 py-3"><MovementProduct product={movement.Product} /></td>
-              <td className="px-4 py-3">{movement.Shop?.Name ?? "-"}</td>
-              <td className="px-4 py-3">{formatQuantity(movement.QuantityDelta)}</td>
-              <td className="px-4 py-3">{formatMoney(movement.RevenueCents)}</td>
-              <td className="px-4 py-3">{formatMoney(movement.CostAmountCents || movement.PurchaseAmountCents)}</td>
-              <td className="px-4 py-3">{formatMoney(movement.GrossProfitCents)}</td>
-              <td className="max-w-[220px] truncate px-4 py-3 text-[var(--text-secondary)]">{movement.Reason || "-"}</td>
-              <td className="px-4 py-3 text-[var(--text-secondary)]">{formatDateTime(movement.CreatedAt)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Flex gap={20} vertical>
+      <PageHeader description="按类型、商品和店铺查看不可变库存流水。" title="流水记录" />
+      <Card className="filter-card">
+        <Form layout="vertical" requiredMark={false}>
+          <Row gutter={[14, 0]}>
+            <Col lg={8} sm={12} xs={24}>
+              <Form.Item label="类型" style={{ marginBottom: 0 }}>
+                <Select
+                  allowClear
+                  options={[
+                    { value: "inbound", label: "入库" },
+                    { value: "sales_outbound", label: "销售出库" },
+                    { value: "adjustment", label: "调整" },
+                  ]}
+                  placeholder="全部类型"
+                  value={type || undefined}
+                  onChange={(value) => { setType(value ?? ""); setPage(1); }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={8} sm={12} xs={24}>
+              <Form.Item label="商品" style={{ marginBottom: 0 }}>
+                <ProductCombobox
+                  allowClear
+                  placeholder="全部商品（输入名称或编码）"
+                  products={products}
+                  value={productID}
+                  onChange={(value) => { setProductID(value); setPage(1); }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={8} sm={12} xs={24}>
+              <Form.Item label="店铺" style={{ marginBottom: 0 }}>
+                <Select
+                  allowClear
+                  notFoundContent="没有店铺"
+                  optionFilterProp="label"
+                  options={shops.map((shop) => ({ value: shop.ID, label: shop.Name }))}
+                  placeholder="全部店铺"
+                  showSearch
+                  value={shopID || undefined}
+                  onChange={(value) => { setShopID(value ?? ""); setPage(1); }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Card>
+      {error ? <Alert action={<Button size="small" onClick={() => void load()}>重试</Button>} message={error} showIcon type="error" /> : null}
+      <Card className="table-card">
+        <Table<StockMovement>
+          columns={columns}
+          dataSource={movements}
+          loading={loading}
+          pagination={tablePagination(pagination, setPage)}
+          rowKey="ID"
+          scroll={{ x: 1380 }}
+        />
+      </Card>
+    </Flex>
   );
 }
 
 function MovementProduct({ product }: { product: Product | null }) {
   if (!product) return <span>-</span>;
   return (
-    <div className="flex items-center gap-3">
-      {product.ImagePath ? (
-        <Image alt={`${product.Name} 图片`} className="h-10 w-10 shrink-0 rounded-md border border-[var(--border-subtle)] object-cover" height={40} src={product.ImagePath} unoptimized width={40} />
-      ) : (
-        <div aria-label="无商品图片" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[var(--border-subtle)] bg-black/[0.03] text-[var(--text-muted)]">
-          <ImageIcon className="h-4 w-4" />
-        </div>
-      )}
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{product.Name}</span>
-          {product.ArchivedAt ? <Badge tone="neutral">已归档</Badge> : null}
-        </div>
-        <div className="truncate font-mono text-xs text-[var(--text-secondary)]">{product.Code}</div>
+    <Flex align="center" className="product-cell" gap={12}>
+      <ProductImage product={product} />
+      <div className="product-cell-copy">
+        <Flex align="center" gap={6}>
+          <span className="product-cell-name">{product.Name}</span>
+          {product.ArchivedAt ? <Tag>已归档</Tag> : null}
+        </Flex>
+        <div className="product-cell-note mono">{product.Code}</div>
       </div>
-    </div>
+    </Flex>
   );
 }

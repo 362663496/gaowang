@@ -6,10 +6,10 @@ export function productOptionLabel(product: ProductOption): string {
   return `${product.Name} · ${product.Code}${product.ArchivedAt ? "（已归档）" : ""}`;
 }
 
-export function findProductByInput(products: ProductOption[], input: string): ProductOption | undefined {
-  const value = input.trim().toLowerCase();
-  if (!value) return undefined;
-  return products.find((product) =>
-    productOptionLabel(product).toLowerCase() === value || product.Name.toLowerCase() === value || product.Code.toLowerCase() === value,
-  );
+export function productSearchText(product: ProductOption): string {
+  return `${product.Name} ${product.Code}`.toLowerCase();
+}
+
+export function matchesProductOption(product: ProductOption, input: string): boolean {
+  return productSearchText(product).includes(input.trim().toLowerCase());
 }

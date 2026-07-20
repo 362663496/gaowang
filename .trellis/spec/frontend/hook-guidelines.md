@@ -2,7 +2,7 @@
 
 ## Current Pattern
 
-There is no data-fetching hook library. Pages use React hooks directly, and the only shared custom hook is `useMessage` in `src/features/use-message.ts`.
+There is no data-fetching hook library. Pages use React hooks directly; transient feedback comes from the contextual `App.useApp()` API provided at the root.
 
 ## Loading Data
 
@@ -20,14 +20,14 @@ There is no data-fetching hook library. Pages use React hooks directly, and the 
 ## Shared Hooks
 
 - Hook names start with `use` and live beside the feature that owns them.
-- Reuse `useMessage` for the existing 2.6-second success message instead of creating page-specific timers.
+- Reuse `App.useApp().message` and `.modal` instead of creating page-specific timers or using static feedback APIs outside the configured context.
 - Extract another custom hook only after stateful behavior is reused or a page cannot be tested/read cleanly without it. Keep API-specific types and errors visible to the caller.
 
 ## Effect Hygiene
 
 - Effects synchronize with external systems: initial/reload requests, local-storage session events, router redirects, or selected-product defaults.
 - Include cleanup for listeners and other ongoing subscriptions. `components/layout/app-shell.tsx` is the listener cleanup reference.
-- Avoid an effect for values that can be calculated during render.
+- Avoid an effect for values that can be calculated during render. Ant Design form field dependencies/defaults should prefer `onValuesChange`, `Form.useWatch`, and `form.setFieldValue`.
 
 ## Avoid
 

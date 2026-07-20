@@ -1,38 +1,39 @@
 "use client";
 
+import {
+  AppstoreOutlined,
+  AuditOutlined,
+  BarChartOutlined,
+  DatabaseOutlined,
+  DashboardOutlined,
+  LogoutOutlined,
+  MenuOutlined,
+  SettingOutlined,
+  ShopOutlined,
+  ShoppingOutlined,
+  SwapOutlined,
+  TeamOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
+import { Button, Drawer, Flex, Layout, Menu, Spin, Tag, Tooltip, Typography } from "antd";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import {
-  ArrowLeftRight,
-  BarChart3,
-  Boxes,
-  DatabaseBackup,
-  History,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  Package,
-  Settings,
-  Store,
-  Users,
-  X,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useMemo, useState } from "react";
 import { apiDeleteSession, devSessionEvent, readDevSession, type DevSession, type Role } from "@/lib/api";
-import { cn } from "@/lib/utils";
+
+const { Content, Header, Sider } = Layout;
 
 const navItems = [
-  { label: "仪表盘", href: "/dashboard", icon: LayoutDashboard },
-  { label: "商品", href: "/products", icon: Package },
-  { label: "店铺", href: "/shops", icon: Store },
-  { label: "当前库存", href: "/inventory", icon: Boxes },
-  { label: "流水记录", href: "/stock-movements", icon: ArrowLeftRight },
-  { label: "报表", href: "/reports", icon: BarChart3 },
-  { label: "操作记录", href: "/audit-logs", icon: History, roles: ["admin"] },
-  { label: "用户管理", href: "/users", icon: Users, roles: ["admin"] },
-  { label: "备份", href: "/settings/backups", icon: DatabaseBackup },
-  { label: "设置", href: "/settings", icon: Settings },
+  { label: "仪表盘", href: "/dashboard", icon: <DashboardOutlined /> },
+  { label: "商品", href: "/products", icon: <ShoppingOutlined /> },
+  { label: "店铺", href: "/shops", icon: <ShopOutlined /> },
+  { label: "当前库存", href: "/inventory", icon: <AppstoreOutlined /> },
+  { label: "流水记录", href: "/stock-movements", icon: <SwapOutlined /> },
+  { label: "报表", href: "/reports", icon: <BarChartOutlined /> },
+  { label: "操作记录", href: "/audit-logs", icon: <AuditOutlined />, roles: ["admin"] as Role[] },
+  { label: "用户管理", href: "/users", icon: <TeamOutlined />, roles: ["admin"] as Role[] },
+  { label: "备份", href: "/settings/backups", icon: <DatabaseOutlined /> },
+  { label: "设置", href: "/settings", icon: <SettingOutlined /> },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -53,92 +54,94 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (session && !session.userId) {
-      router.replace("/login");
-    }
+    if (session && !session.userId) router.replace("/login");
   }, [router, session]);
+
+  const visibleItems = useMemo(
+    () => navItems.filter((item) => !item.roles || (session && item.roles.includes(session.role))),
+    [session],
+  );
+  const active = visibleItems.find((item) => pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`)));
+
+  if (!session?.userId) {
+    return (
+      <Flex align="center" className="session-loading" justify="center">
+        <Spin tip="正在验证登录状态" />
+      </Flex>
+    );
+  }
 
   function logout() {
     apiDeleteSession();
     router.replace("/login");
   }
 
-  if (!session?.userId) {
-    return <main className="min-h-dvh bg-[var(--surface-page)]" />;
-  }
+  const menu = (
+    <Menu
+      items={visibleItems.map((item) => ({
+        key: item.href,
+        icon: item.icon,
+        label: <Link href={item.href} onClick={() => setMobileOpen(false)}>{item.label}</Link>,
+      }))}
+      mode="inline"
+      selectedKeys={active ? [active.href] : []}
+      theme="dark"
+    />
+  );
 
   return (
-    <div className="min-h-dvh bg-[var(--surface-page)] text-[var(--text-primary)]">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[232px] border-r border-white/10 bg-[var(--surface-sidebar)] px-3 py-4 text-slate-300 lg:block">
-        <SidebarContent pathname={pathname} role={session.role} />
-      </aside>
+    <Layout className="app-shell">
+      <Sider className="app-sider" theme="dark" width={232}>
+        <Brand />
+        {menu}
+      </Sider>
 
-      <div className="lg:pl-[232px]">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-[var(--border-subtle)] bg-white/85 px-4 backdrop-blur md:px-6">
-          <div className="flex items-center gap-3">
-            <Button aria-label="打开导航" size="icon" type="button" variant="ghost" onClick={() => setMobileOpen(true)}>
-              <Menu className="h-5 w-5" />
-            </Button>
-            <div className="hidden text-sm font-medium text-[var(--text-secondary)] sm:block">库存后台</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs text-[var(--text-secondary)]">
-              <span className={cn("h-2 w-2 rounded-full", session.userId ? "bg-emerald-500" : "bg-amber-500")} />
-              <span>{session.userId ? `${session.role} · ${session.userId.slice(0, 8)}` : "未设置身份"}</span>
-            </div>
-            <Button aria-label="退出登录" size="icon" title="退出登录" type="button" variant="ghost" onClick={logout}>
-              <LogOut className="h-4 w-4" />
-            </Button>
-          </div>
-        </header>
+      <Layout className="app-main-layout">
+        <Header className="app-header">
+          <Flex align="center" gap={12}>
+            <Button
+              aria-label="打开导航"
+              className="mobile-menu-button"
+              icon={<MenuOutlined />}
+              type="text"
+              onClick={() => setMobileOpen(true)}
+            />
+            <Typography.Text strong>{active?.label ?? "库存后台"}</Typography.Text>
+          </Flex>
+          <Flex align="center" gap={10}>
+            <Tag className="session-tag" color="green" icon={<UserOutlined />}>
+              {session.role} · {session.userId.slice(0, 8)}
+            </Tag>
+            <Tooltip title="退出登录">
+              <Button aria-label="退出登录" icon={<LogoutOutlined />} type="text" onClick={logout} />
+            </Tooltip>
+          </Flex>
+        </Header>
+        <Content className="app-content">{children}</Content>
+      </Layout>
 
-        <main className="mx-auto w-full max-w-[1440px] px-4 py-5 md:px-6 lg:py-6">{children}</main>
-      </div>
-
-      {mobileOpen ? (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <button className="absolute inset-0 bg-black/35" type="button" aria-label="关闭导航" onClick={() => setMobileOpen(false)} />
-          <aside className="relative h-full w-[280px] bg-[var(--surface-sidebar)] px-3 py-4 text-slate-300 shadow-2xl">
-            <div className="mb-3 flex justify-end">
-              <Button aria-label="关闭导航" size="icon" type="button" variant="ghost" onClick={() => setMobileOpen(false)}>
-                <X className="h-5 w-5 text-white" />
-              </Button>
-            </div>
-            <SidebarContent pathname={pathname} role={session.role} onNavigate={() => setMobileOpen(false)} />
-          </aside>
-        </div>
-      ) : null}
-    </div>
+      <Drawer
+        className="mobile-navigation"
+        open={mobileOpen}
+        placement="left"
+        title={<Brand compact />}
+        width={280}
+        onClose={() => setMobileOpen(false)}
+      >
+        {menu}
+      </Drawer>
+    </Layout>
   );
 }
 
-function SidebarContent({ pathname, role, onNavigate }: { pathname: string; role: Role; onNavigate?: () => void }) {
+function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <>
-      <div className="mb-6 px-2">
-        <div className="text-base font-semibold text-white">Gaowang</div>
-        <div className="mt-1 text-xs text-slate-500">Inventory Command</div>
+    <div className={compact ? "brand brand-compact" : "brand"}>
+      <div className="brand-mark"><ShoppingOutlined /></div>
+      <div>
+        <div className="brand-name">Gaowang</div>
+        {!compact ? <div className="brand-caption">Inventory Command</div> : null}
       </div>
-      <nav className="grid gap-1">
-        {navItems.filter((item) => !item.roles || item.roles.includes(role)).map((item) => {
-          const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
-          const Icon = item.icon;
-          return (
-            <Link
-              className={cn(
-                "flex h-9 items-center gap-2 rounded-md px-2.5 text-sm transition hover:bg-white/[0.07] hover:text-white",
-                active ? "bg-white/10 text-white" : "text-slate-400",
-              )}
-              href={item.href}
-              key={item.href}
-              onClick={onNavigate}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
-    </>
+    </div>
   );
 }
