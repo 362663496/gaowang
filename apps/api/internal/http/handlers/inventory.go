@@ -43,7 +43,7 @@ type adjustmentRequest struct {
 
 func (h InventoryHandler) ListCurrent(c *gin.Context) {
 	var items []models.InventorySnapshot
-	base := h.activeInventoryQuery(c.Query("low_stock") == "true")
+	base := h.activeInventoryQuery(c.Query("low_stock") == "true", c.Query("q"))
 	query, meta, err := paginate(c, base)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to count inventory")
@@ -61,7 +61,7 @@ func (h InventoryHandler) ListCurrent(c *gin.Context) {
 
 func (h InventoryHandler) ExportCurrent(c *gin.Context) {
 	var items []models.InventorySnapshot
-	if err := h.activeInventoryQuery(c.Query("low_stock") == "true").
+	if err := h.activeInventoryQuery(c.Query("low_stock") == "true", c.Query("q")).
 		Preload("Product").
 		Order("inventory_snapshots.updated_at desc").
 		Find(&items).Error; err != nil {
@@ -78,12 +78,16 @@ func (h InventoryHandler) ExportCurrent(c *gin.Context) {
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data)
 }
 
-func (h InventoryHandler) activeInventoryQuery(lowStock bool) *gorm.DB {
+func (h InventoryHandler) activeInventoryQuery(lowStock bool, keyword string) *gorm.DB {
 	base := h.DB.Model(&models.InventorySnapshot{}).
 		Joins("JOIN products ON products.id = inventory_snapshots.product_id").
 		Where("products.archived_at IS NULL")
 	if lowStock {
 		base = base.Where("products.low_stock_threshold > 0 AND inventory_snapshots.quantity <= products.low_stock_threshold")
+	}
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		base = base.Where("products.name ILIKE ? OR products.code ILIKE ?", like, like)
 	}
 	return base
 }

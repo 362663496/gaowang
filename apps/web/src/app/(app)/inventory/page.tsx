@@ -1,7 +1,7 @@
 "use client";
 
-import { DownloadOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Col, Flex, Row, Statistic, Table, Tag, type TableProps } from "antd";
+import { DownloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Card, Col, Flex, Input, Row, Statistic, Table, Tag, type TableProps } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { InventoryActions } from "@/features/inventory/action-forms";
@@ -21,6 +21,7 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [query, setQuery] = useState("");
   const [showLowStock, setShowLowStock] = useState(false);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(initialPagination);
@@ -31,6 +32,7 @@ export default function InventoryPage() {
     try {
       const listParams = new URLSearchParams({ page: String(page) });
       if (showLowStock) listParams.set("low_stock", "true");
+      if (query.trim()) listParams.set("q", query.trim());
       const [visibleStock, stock, productList, shopList] = await Promise.all([
         apiGet<Paginated<InventorySnapshot>>(`/inventory?${listParams}`),
         apiGet<Paginated<InventorySnapshot>>("/inventory?all=true"),
@@ -48,7 +50,7 @@ export default function InventoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, showLowStock]);
+  }, [page, query, showLowStock]);
 
   useEffect(() => {
     void load();
@@ -96,9 +98,10 @@ export default function InventoryPage() {
     try {
       const params = new URLSearchParams();
       if (showLowStock) params.set("low_stock", "true");
-      const query = params.toString();
+      if (query.trim()) params.set("q", query.trim());
+      const exportQuery = params.toString();
       const today = new Date().toISOString().slice(0, 10);
-      await apiDownload(`/inventory/export${query ? `?${query}` : ""}`, `inventory-${today}.xlsx`);
+      await apiDownload(`/inventory/export${exportQuery ? `?${exportQuery}` : ""}`, `inventory-${today}.xlsx`);
       message.success("导出成功");
     } catch (err) {
       message.error(err instanceof Error ? err.message : "导出失败");
@@ -112,10 +115,22 @@ export default function InventoryPage() {
       <PageHeader
         actions={
           <>
+            <Input
+              allowClear
+              aria-label="筛选商品"
+              placeholder="搜索商品名称或编码"
+              prefix={<SearchOutlined />}
+              style={{ width: 220 }}
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+            />
+            <InventoryActions inventory={inventory} products={products} shops={shops} onDone={done} />
             <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportExcel()}>
               导出 Excel
             </Button>
-            <InventoryActions inventory={inventory} products={products} shops={shops} onDone={done} />
           </>
         }
         description="库存快照由入库、销售出库和调整流水自动更新。"
