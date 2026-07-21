@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
-- **Last Active**: 2026-07-17
+- **Total Sessions**: 4
+- **Last Active**: 2026-07-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~108 | Active |
+| `journal-1.md` | ~141 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-07-22 | API access control | `14d3146` | `master` |
 | 3 | 2026-07-17 | 完成商品库存工作流与 Ant Design 前端升级 | `a077db7`, `4b3a75d`, `ae21cec` | `master` |
 | 2 | 2026-07-15 | 商品状态管理与库存图片 | `2bbc641` | `master` |
 | 1 | 2026-07-15 | Initialize and bootstrap Trellis | `1a59a69` | `master` |

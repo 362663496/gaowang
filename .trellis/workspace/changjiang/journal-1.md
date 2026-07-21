@@ -106,3 +106,36 @@ Initialized Trellis, populated backend and frontend project specs, and passed th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: API access control
+
+**Date**: 2026-07-22
+**Task**: API access control
+**Branch**: `master`
+
+### Summary
+
+Completed database-backed cookie sessions, explicit route permissions, staff permission management, frontend permission-aware navigation, and integration with inventory search/export.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `14d3146` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
