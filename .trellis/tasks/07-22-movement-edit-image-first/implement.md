@@ -163,4 +163,13 @@ git diff --check
 - [x] 后端：`go test ./...`、`go vet ./...`。
 - [x] 前端：lint、严格 TypeScript、18 个 Vitest、生产构建、`npm audit --omit=dev`（0 漏洞）。
 - [x] 根目录：`docker compose config --quiet`、`git diff --check`、未合并冲突检查。
-- [ ] 浏览器人工验收：当前运行中的 Docker 服务仍是旧镜像；待部署本次代码后执行下方人工验收，不在本轮重启用户实例。
+- [ ] 浏览器人工验收：自动化与线上 HTTP 冒烟已通过；完整登录态业务交互仍按下方清单人工执行。
+
+## 阿里云发布记录（2026-07-22）
+
+- [x] 功能提交 `81ed7ae` 已推送到 `origin/master`。
+- [x] 发布前数据库备份已生成并通过 `gzip -t`。
+- [x] API 与 Web 均在本地构建为 linux/amd64 成品；Web standalone 本地 `/login` 冒烟为 `200`。
+- [x] 服务器仅校验、解压、切换和重启，没有执行源码构建。
+- [x] 原子发布 `/opt/gaowang/releases/20260722013700`，回滚点为 `/opt/gaowang/releases/20260720162414`。
+- [x] API/Web active，健康、登录、静态资源、上传图片与新增数据库列检查通过。
