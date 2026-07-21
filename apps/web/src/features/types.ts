@@ -63,7 +63,54 @@ export type StockMovement = {
   CostAmountCents: number;
   GrossProfitCents: number;
   Reason: string;
+  OperatorID: string;
+  Operator: User;
+  Revision: number;
+  LastEditedByID: string | null;
+  LastEditedBy: User | null;
   CreatedAt: string;
+  UpdatedAt: string;
+  IsLatest: boolean;
+};
+
+export type MovementRevisionValues = {
+  id: string;
+  type: MovementType;
+  product_id: string;
+  operator_id: string;
+  created_at: string;
+  quantity_delta: number;
+  purchase_unit_cents: number | null;
+  sale_unit_cents: number | null;
+  shop_id: string | null;
+  note: string;
+  cost_unit_cents: number;
+  purchase_amount_cents: number;
+  revenue_cents: number;
+  cost_amount_cents: number;
+  gross_profit_cents: number;
+};
+
+export type MovementImpact = {
+  current_quantity: number;
+  result_quantity: number;
+  quantity_change: number;
+  current_moving_average_cost_cents: number;
+  result_moving_average_cost_cents: number;
+  current_inventory_value_cents: number;
+  result_inventory_value_cents: number;
+  inventory_value_delta_cents: number;
+  purchase_amount_delta_cents: number;
+  revenue_delta_cents: number;
+  cost_delta_cents: number;
+  gross_profit_delta_cents: number;
+};
+
+export type MovementPreview = {
+  before: MovementRevisionValues;
+  after: MovementRevisionValues;
+  impact: MovementImpact;
+  expected_revision: number;
 };
 
 export type SalesSummary = {
@@ -84,6 +131,7 @@ export type ProductRankingRow = {
   product_id: string;
   product_name: string;
   product_code: string;
+  product_image_path: string;
   archived: boolean;
   revenue_cents: number;
   cost_cents: number;

@@ -20,6 +20,62 @@ import (
 	"gorm.io/gorm"
 )
 
+func Test_ProductCreate_requires_image_and_cleans_failed_upload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newProductTestDB(t)
+	user := models.User{Name: "Admin", Email: "create@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	token := createSessionToken(t, db, user.ID)
+	uploadDir := t.TempDir()
+	router := apihttp.NewRouter(config.Config{AuthSecret: testAuthSecret, UploadDir: uploadDir}, db)
+	fields := map[string]string{
+		"name": "Tea", "code": "CREATE-TEA", "default_purchase_cents": "100",
+		"default_sale_cents": "200", "low_stock_threshold": "2", "note": "new",
+	}
+
+	response := productMultipartRequest(t, router, token, http.MethodPost, "/api/v1/products", fields, "", nil)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "VALIDATION") {
+		t.Fatalf("missing image status/body = %d %s", response.Code, response.Body.String())
+	}
+	response = productMultipartRequest(t, router, token, http.MethodPost, "/api/v1/products", fields, "tea.gif", []byte("image"))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "UPLOAD_INVALID") {
+		t.Fatalf("invalid image status/body = %d %s", response.Code, response.Body.String())
+	}
+	response = productMultipartRequest(t, router, token, http.MethodPost, "/api/v1/products", fields, "tea.png", make([]byte, 5*1024*1024+1))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "UPLOAD_INVALID") {
+		t.Fatalf("oversize image status/body = %d %s", response.Code, response.Body.String())
+	}
+	response = productMultipartRequest(t, router, token, http.MethodPost, "/api/v1/products", fields, "tea.png", []byte("image"))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", response.Code, response.Body.String())
+	}
+	var product models.Product
+	if err := db.First(&product, "code = ?", "CREATE-TEA").Error; err != nil {
+		t.Fatalf("load created product: %v", err)
+	}
+	if product.ImagePath == "" {
+		t.Fatal("created product image path is empty")
+	}
+	filesBefore, err := os.ReadDir(uploadDir)
+	if err != nil {
+		t.Fatalf("read upload dir: %v", err)
+	}
+	fields["name"] = "Duplicate"
+	response = productMultipartRequest(t, router, token, http.MethodPost, "/api/v1/products", fields, "duplicate.jpg", []byte("image"))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "PRODUCT_CREATE_FAILED") {
+		t.Fatalf("duplicate status/body = %d %s", response.Code, response.Body.String())
+	}
+	filesAfter, err := os.ReadDir(uploadDir)
+	if err != nil {
+		t.Fatalf("read upload dir after duplicate: %v", err)
+	}
+	if len(filesAfter) != len(filesBefore) {
+		t.Fatalf("failed create leaked file: before=%d after=%d", len(filesBefore), len(filesAfter))
+	}
+}
+
 func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newProductTestDB(t)

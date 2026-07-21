@@ -17,7 +17,11 @@ export function ProductImage({ product, preview = false, size = 40 }: {
   }, [product.ImagePath]);
 
   if (!product.ImagePath || failed) {
-    return <Avatar aria-label="无商品图片" icon={<PictureOutlined />} shape="square" size={size} />;
+    return (
+      <Avatar aria-label="待补商品图片" shape="square" size={size}>
+        {size >= 40 ? <span style={{ fontSize: size >= 64 ? 12 : 10 }}>待补图</span> : <PictureOutlined />}
+      </Avatar>
+    );
   }
 
   return (

@@ -1,10 +1,6 @@
 import type { Product } from "@/features/types";
 
-export type ProductOption = Pick<Product, "ID" | "Name" | "Code" | "ArchivedAt">;
-
-export function productOptionLabel(product: ProductOption): string {
-  return `${product.Name} · ${product.Code}${product.ArchivedAt ? "（已归档）" : ""}`;
-}
+export type ProductOption = Pick<Product, "Name" | "Code">;
 
 export function productSearchText(product: ProductOption): string {
   return `${product.Name} ${product.Code}`.toLowerCase();

@@ -7,6 +7,7 @@ import { PageEmpty, PageError, PageLoading } from "@/components/layout/page-feed
 import { PageHeader } from "@/components/layout/page-header";
 import { useSession } from "@/components/layout/session-context";
 import { MovementBadge, StockBadge } from "@/features/labels";
+import { ProductIdentity } from "@/features/product-identity";
 import type { InventorySnapshot, SalesSummary, StockMovement } from "@/features/types";
 import { apiGet } from "@/lib/api";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
@@ -72,7 +73,7 @@ export default function DashboardPage() {
 
   const columns: TableProps<StockMovement>["columns"] = [
     { title: "类型", dataIndex: "Type", width: 110, render: (value) => <MovementBadge type={value} /> },
-    { title: "商品", dataIndex: ["Product", "Name"], ellipsis: true, render: (value?: string) => <strong>{value ?? "-"}</strong> },
+    { title: "商品", dataIndex: "Product", width: 240, render: (_, movement) => <ProductIdentity product={movement.Product} /> },
     { title: "数量", dataIndex: "QuantityDelta", width: 100, render: formatQuantity },
     {
       title: "金额",
@@ -126,8 +127,7 @@ export default function DashboardPage() {
                   renderItem={(item) => (
                     <List.Item>
                       <List.Item.Meta
-                        description={<span className="mono">{item.Product.Code}</span>}
-                        title={item.Product.Name}
+                        title={<ProductIdentity product={item.Product} />}
                       />
                       <StockBadge quantity={item.Quantity} threshold={item.Product.LowStockThreshold} />
                     </List.Item>

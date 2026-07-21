@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageEmpty, PageError, PageLoading } from "@/components/layout/page-feedback";
 import { PageHeader } from "@/components/layout/page-header";
 import { useSession } from "@/components/layout/session-context";
+import { ProductIdentity } from "@/features/product-identity";
 import type { InventorySnapshot, ProductRankingRow, SalesSummary, SalesTrendRow, ShopRankingRow } from "@/features/types";
 import { apiGet } from "@/lib/api";
 import { formatMoney, formatQuantity } from "@/lib/format";
@@ -64,8 +65,7 @@ export default function ReportsPage() {
   }
 
   const lowStockColumns: TableProps<InventorySnapshot>["columns"] = [
-    { title: "商品", dataIndex: ["Product", "Name"], render: (value: string) => <strong>{value}</strong> },
-    { title: "编码", dataIndex: ["Product", "Code"], render: (value: string) => <span className="mono">{value}</span> },
+    { title: "商品", dataIndex: "Product", width: 280, render: (_, item) => <ProductIdentity product={item.Product} /> },
     { title: "当前库存", dataIndex: "Quantity", render: formatQuantity },
     { title: "阈值", dataIndex: ["Product", "LowStockThreshold"], render: formatQuantity },
   ];
@@ -93,6 +93,7 @@ export default function ReportsPage() {
                 id: item.product_id,
                 label: item.product_name,
                 sublabel: item.product_code,
+                imagePath: item.product_image_path,
                 archived: item.archived,
                 revenue: item.revenue_cents,
                 quantity: item.quantity_sold,
@@ -165,7 +166,7 @@ function RankingPanel({
   title,
 }: {
   title: string;
-  rows: Array<{ id: string; label: string; sublabel?: string; archived?: boolean; revenue: number; quantity: number; gross: number }>;
+  rows: Array<{ id: string; label: string; sublabel?: string; imagePath?: string; archived?: boolean; revenue: number; quantity: number; gross: number }>;
 }) {
   return (
     <Card title={title}>
@@ -180,12 +181,19 @@ function RankingPanel({
                 avatar={<Tag color="blue">#{index + 1}</Tag>}
                 description={
                   <span>
-                    {row.sublabel ? <span className="mono">{row.sublabel} </span> : null}
-                    {row.archived ? <Tag>已归档</Tag> : null}
                     销量 {formatQuantity(row.quantity)} · 毛利 {formatMoney(row.gross)}
                   </span>
                 }
-                title={row.label}
+                title={row.sublabel !== undefined ? (
+                  <ProductIdentity
+                    product={{
+                      Name: row.label,
+                      Code: row.sublabel,
+                      ImagePath: row.imagePath ?? "",
+                      ArchivedAt: row.archived ? "archived" : null,
+                    }}
+                  />
+                ) : row.label}
               />
               <strong>{formatMoney(row.revenue)}</strong>
             </List.Item>

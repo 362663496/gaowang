@@ -8,7 +8,7 @@ import { useSession } from "@/components/layout/session-context";
 import { InventoryActions } from "@/features/inventory/action-forms";
 import { StockBadge } from "@/features/labels";
 import { initialPagination, tablePagination } from "@/features/pagination";
-import { ProductImage } from "@/features/product-image";
+import { ProductIdentity } from "@/features/product-identity";
 import type { InventorySnapshot, Paginated, Product, Shop } from "@/features/types";
 import { apiDownload, apiGet } from "@/lib/api";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
@@ -74,15 +74,7 @@ export default function InventoryPage() {
       title: "商品",
       dataIndex: "Product",
       width: 280,
-      render: (_, item) => (
-        <Flex align="center" className="product-cell" gap={12}>
-          <ProductImage preview product={item.Product} />
-          <div className="product-cell-copy">
-            <div className="product-cell-name">{item.Product.Name}</div>
-            <div className="product-cell-note mono">{item.Product.Code}</div>
-          </div>
-        </Flex>
-      ),
+      render: (_, item) => <ProductIdentity preview product={item.Product} />,
     },
     { title: "数量", dataIndex: "Quantity", width: 110, render: (value: number) => <Tag>{formatQuantity(value)}</Tag> },
     { title: "移动平均成本", dataIndex: "MovingAverageCostCents", width: 150, render: formatMoney },

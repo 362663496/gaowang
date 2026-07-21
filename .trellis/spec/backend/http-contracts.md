@@ -125,21 +125,23 @@ query.Session(&gorm.Session{}).Count(&total)
 query.Session(&gorm.Session{}).Offset(offset).Limit(size).Find(&items)
 ```
 
-## Scenario: Multipart Product Update With Optional Image
+## Scenario: Multipart Product Create And Update Images
 
 ### 1. Scope / Trigger
 
-Use this contract when editing an active product and optionally replacing its uploaded image.
+Use this contract when creating a product with its required main image or editing an active product and optionally replacing the image.
 
 ### 2. Signatures
 
 - Request: `PATCH /api/v1/products/:id`, content type `multipart/form-data`
-- Fields: `name`, `code`, `default_purchase_cents`, `default_sale_cents`, `low_stock_threshold`, `note`, optional `image`
-- Response: `200 {"item": Product}`
+- Create: `POST /api/v1/products`, content type `multipart/form-data`, required `image`
+- Fields: `name`, `code`, `default_purchase_cents`, `default_sale_cents`, `low_stock_threshold`, `note`; `image` is required on create and optional on update
+- Response: create uses `201 {"item": Product}`; update uses `200 {"item": Product}`
 
 ### 3. Contracts
 
 - Only an unarchived product can be updated; `Enabled` and `ArchivedAt` are not editable here.
+- Creating a product requires one `image`; existing image-less products remain valid and may be edited without uploading a replacement.
 - With no `image`, preserve `ImagePath`.
 - With a new image, save it first; if the database update fails, remove the new file. After a successful update, remove the old file best-effort.
 - Record `product.update` with the product resource ID.
@@ -152,19 +154,22 @@ Use this contract when editing an active product and optionally replacing its up
 | Invalid ID | `400 VALIDATION` |
 | Missing or archived product | `404 PRODUCT_NOT_FOUND` |
 | Missing required fields / invalid integer fields | `400 VALIDATION` |
+| Create without `image` | `400 VALIDATION` |
 | Invalid image | `400 UPLOAD_INVALID` |
 | Duplicate code or invalid update | `400 PRODUCT_UPDATE_FAILED` |
-| Success | `200`, updated item, `product.update` audit |
+| Success | create: `201` and `product.create` audit; update: `200` and `product.update` audit |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: replace the image, persist all fields, then remove only the previous file.
+- Good: create with one JPG/JPEG/PNG/WebP image no larger than 5 MB.
 - Base: edit text and prices without an image; the prior image remains readable.
 - Bad: delete the old image before the database accepts the replacement.
 
 ### 6. Tests Required
 
 - Assert every editable field changes and uneditable status fields remain unchanged.
+- Assert create without an image fails, create with an image persists its path, and a failed create removes the newly saved file.
 - Assert no-file update preserves the old path and file.
 - Assert replacement returns the new path, removes the old file, and records the audit.
 - Assert failed updates return the stable error envelope and do not leak a newly uploaded file.
@@ -183,4 +188,76 @@ if result.Error != nil || result.RowsAffected == 0 {
     return
 }
 removeProductImage(uploadDir, current.ImagePath)
+```
+
+## Scenario: Latest Stock Movement Correction
+
+### 1. Scope / Trigger
+
+Use this contract when previewing or correcting an existing inbound, sales-outbound, or adjustment movement. Corrections are accounting mutations, not ordinary CRUD.
+
+### 2. Signatures
+
+- `POST /api/v1/stock-movements/:id/preview` requires `movement.update` and performs no writes.
+- `PATCH /api/v1/stock-movements/:id` requires `movement.update` and commits one correction.
+- Database: `stock_movements.revision`, `updated_at`, nullable `last_edited_by_id`; response-only `IsLatest`.
+- Service: `InventoryService.PreviewMovementUpdate(MovementUpdateInput)` and `UpdateMovement(MovementUpdateInput)`.
+
+### 3. Contracts
+
+Both endpoints accept exactly one JSON object with `expected_revision`, `note`, `change_reason`, and type-specific fields:
+
+```json
+{
+  "expected_revision": 1,
+  "quantity": 8,
+  "unit_cents": 350,
+  "shop_id": null,
+  "note": "业务备注",
+  "change_reason": "录入错误"
+}
+```
+
+- Inbound: positive `quantity`, nonnegative `unit_cents`, optional `shop_id`; no `quantity_delta`.
+- Sales outbound: positive `quantity`, nonnegative `unit_cents`, required `shop_id`; no `quantity_delta`.
+- Adjustment: nonzero `quantity_delta`, required `note`, no quantity/unit/shop.
+- `note` and `change_reason` are at most 500 characters; `change_reason` is always required and exists only in audit metadata.
+- Product, type, original operator, and `created_at` are absent from the request and immutable. Unknown JSON fields are rejected.
+- Only the latest movement for the product under `created_at DESC, id DESC` is editable. Metadata-only edits are allowed for an archived product; numeric edits are not.
+- Preview returns `before`, `after`, `impact`, and `expected_revision`. Save returns the revised `item` and the same impact shape.
+- Numeric save reverses the saved latest effect from the current snapshot and reapplies the same pure transition used by create. It updates the original row and increments `revision`; no movement is appended or deleted.
+- Snapshot, movement, last editor/time, and complete `movement.updated` audit commit in one transaction.
+
+### 4. Validation & Error Matrix
+
+| Condition | Response |
+| --- | --- |
+| Invalid ID, field combination, number, note, reason, or unknown field | `400 VALIDATION` |
+| Missing movement | `404 MOVEMENT_NOT_FOUND` |
+| Missing `movement.update` | `403 FORBIDDEN` |
+| Non-latest target or revision mismatch | `409 MOVEMENT_STALE` |
+| New outbound/adjustment would make inventory negative | `409 INSUFFICIENT_STOCK` |
+| Archived product with changed numeric fields | `409 PRODUCT_ARCHIVED` |
+| Snapshot/reversal/audit/persistence failure | `500 INTERNAL`, full rollback |
+
+### 5. Good / Base / Bad Cases
+
+- Good: revise latest sale quantity from 4 to 5; snapshot, row revenue/cost/gross, original-date reports, revision, editor, and audit all change together.
+- Base: revise only note or shop; snapshot and all derived money fields remain unchanged while revision and audit advance.
+- Bad: calculate impact in the browser, patch a non-latest row, or update snapshot without the row/audit; these paths bypass accounting and stale-write protection.
+
+### 6. Tests Required
+
+- Service: all three transitions, moving-average/rounding behavior, metadata-only edit, archived numeric rejection, insufficient stock, stale ID/version, preview no-write, and audit-failure rollback.
+- Route: independent permission on preview/PATCH, strict unknown-field rejection, safe operator DTO without `PasswordHash`, `IsLatest`, stable error codes, and immutable identity/time.
+- Report: an edited sale remains in its original `created_at` period with corrected revenue/cost/gross.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: direct snapshot update loses revision, movement, and audit guarantees.
+db.Model(&models.InventorySnapshot{}).Where("product_id = ?", productID).Update("quantity", newQuantity)
+
+// Correct: the service owns latest/version checks, shared accounting, and the transaction.
+movement, impact, err := (services.InventoryService{DB: db}).UpdateMovement(input)
 ```

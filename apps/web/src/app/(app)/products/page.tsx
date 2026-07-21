@@ -24,7 +24,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { tablePagination, initialPagination } from "@/features/pagination";
-import { ProductImage } from "@/features/product-image";
+import { ProductIdentity } from "@/features/product-identity";
 import type { Paginated, Product } from "@/features/types";
 import { useSession } from "@/components/layout/session-context";
 import { apiGet, apiPost, request } from "@/lib/api";
@@ -105,8 +105,13 @@ export default function ProductsPage() {
 
   function confirmDelete(product: Product) {
     modal.confirm({
-      title: `删除商品“${product.Name}”？`,
-      content: "未使用商品会彻底删除；有历史的零库存商品会归档。此操作不可撤销。",
+      title: "确认删除商品？",
+      content: (
+        <Flex gap={12} vertical>
+          <ProductIdentity product={product} size={56} />
+          <span>未使用商品会彻底删除；有历史的零库存商品会归档。此操作不可撤销。</span>
+        </Flex>
+      ),
       okText: "确认删除",
       cancelText: "取消",
       okButtonProps: { danger: true },
@@ -132,12 +137,9 @@ export default function ProductsPage() {
       dataIndex: "Name",
       width: 260,
       render: (_, product) => (
-        <Flex align="center" className="product-cell" gap={12}>
-          <ProductImage preview product={product} />
-          <div className="product-cell-copy">
-            <div className="product-cell-name">{product.Name}</div>
-            <div className="product-cell-note">{product.Note || "无备注"}</div>
-          </div>
+        <Flex gap={4} vertical>
+          <ProductIdentity preview product={product} />
+          <span className="product-cell-note">{product.Note || "无备注"}</span>
         </Flex>
       ),
     },
@@ -265,6 +267,11 @@ function ProductForm({ product, onCancel, onSaved }: {
   const [files, setFiles] = useState<UploadFile[]>([]);
 
   async function submit(values: ProductFormValues) {
+    const image = files[0]?.originFileObj;
+    if (!product && !image) {
+      setError("请上传商品图片");
+      return;
+    }
     setSaving(true);
     setError("");
     const form = new FormData();
@@ -274,7 +281,6 @@ function ProductForm({ product, onCancel, onSaved }: {
     form.set("default_sale_cents", String(yuanToCents(String(values.sale_yuan ?? 0))));
     form.set("low_stock_threshold", String(values.low_stock_threshold ?? 0));
     form.set("note", values.note ?? "");
-    const image = files[0]?.originFileObj;
     if (image) form.set("image", image);
     try {
       const data = product
@@ -303,6 +309,31 @@ function ProductForm({ product, onCancel, onSaved }: {
       onFinish={submit}
     >
       {error ? <Alert message={error} showIcon style={{ marginBottom: 16 }} type="error" /> : null}
+      <Form.Item label={product ? "替换商品图片（可选）" : "商品图片（必填）"} required={!product}>
+        {product ? <div style={{ marginBottom: 12 }}><ProductIdentity preview product={product} size={72} /></div> : null}
+        <Upload
+          accept=".jpg,.jpeg,.png,.webp"
+          beforeUpload={(file) => {
+            const supported = /\.(jpe?g|png|webp)$/i.test(file.name);
+            if (!supported) {
+              setError("图片仅支持 JPG、JPEG、PNG 或 WebP");
+              return Upload.LIST_IGNORE;
+            }
+            if (file.size > 5 * 1024 * 1024) {
+              setError("图片大小不能超过 5MB");
+              return Upload.LIST_IGNORE;
+            }
+            setError("");
+            return false;
+          }}
+          fileList={files}
+          listType="picture"
+          maxCount={1}
+          onChange={({ fileList }) => setFiles(fileList)}
+        >
+          <Button icon={<UploadOutlined />}>选择图片</Button>
+        </Upload>
+      </Form.Item>
       <Row gutter={14}>
         <Col sm={12} xs={24}>
           <Form.Item label="商品名称" name="name" rules={[{ required: true, message: "请输入商品名称" }]}><Input /></Form.Item>
@@ -318,19 +349,6 @@ function ProductForm({ product, onCancel, onSaved }: {
         </Col>
         <Col sm={12} xs={24}>
           <Form.Item label="低库存阈值" name="low_stock_threshold"><InputNumber min={0} precision={0} style={{ width: "100%" }} /></Form.Item>
-        </Col>
-        <Col sm={12} xs={24}>
-          <Form.Item label={product ? "替换商品图片（可选）" : "商品图片（可选）"}>
-            <Upload
-              accept=".jpg,.jpeg,.png,.webp"
-              beforeUpload={() => false}
-              fileList={files}
-              maxCount={1}
-              onChange={({ fileList }) => setFiles(fileList)}
-            >
-              <Button icon={<UploadOutlined />}>选择图片</Button>
-            </Upload>
-          </Form.Item>
         </Col>
       </Row>
       <Form.Item label="备注" name="note"><Input.TextArea maxLength={500} rows={3} showCount /></Form.Item>

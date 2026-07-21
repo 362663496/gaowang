@@ -10,6 +10,7 @@ import (
 
 	apihttp "gaowang/apps/api/internal/http"
 	"gaowang/apps/api/internal/models"
+	"gaowang/apps/api/internal/services"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -49,7 +50,7 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newReportTestDB(t)
 	user := createReportUser(t, db)
-	product := models.Product{Name: "Tea", Code: "TEA", Enabled: true}
+	product := models.Product{Name: "Tea", Code: "TEA", ImagePath: "/uploads/tea.png", Enabled: true}
 	shop := models.Shop{Name: "Main", Enabled: true}
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatalf("create product: %v", err)
@@ -57,13 +58,34 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	if err := db.Create(&shop).Error; err != nil {
 		t.Fatalf("create shop: %v", err)
 	}
+	service := services.InventoryService{DB: db}
+	if err := service.CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 5, UnitCents: 100, OperatorID: user.ID}); err != nil {
+		t.Fatalf("create inbound: %v", err)
+	}
+	if err := service.CreateSalesOutbound(services.OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, SaleUnitCents: 250, OperatorID: user.ID}); err != nil {
+		t.Fatalf("create sale: %v", err)
+	}
 	createdAt := time.Now().UTC().Add(-time.Hour)
-	if err := db.Create(&models.StockMovement{
-		Type: models.MovementTypeSalesOutbound, ProductID: product.ID, ShopID: &shop.ID,
-		QuantityDelta: -2, RevenueCents: 500, CostAmountCents: 200, GrossProfitCents: 300,
-		OperatorID: user.ID, CreatedAt: createdAt,
-	}).Error; err != nil {
-		t.Fatalf("create movement: %v", err)
+	var sale models.StockMovement
+	if err := db.Where("type = ?", models.MovementTypeSalesOutbound).First(&sale).Error; err != nil {
+		t.Fatalf("load sale: %v", err)
+	}
+	if err := db.Model(&models.StockMovement{}).Where("type = ?", models.MovementTypeInbound).Update("created_at", createdAt.Add(-time.Hour)).Error; err != nil {
+		t.Fatalf("date inbound: %v", err)
+	}
+	if err := db.Model(&sale).Update("created_at", createdAt).Error; err != nil {
+		t.Fatalf("date sale: %v", err)
+	}
+	quantity, unit := int64(3), int64(300)
+	updated, _, err := service.UpdateMovement(services.MovementUpdateInput{
+		MovementID: sale.ID, ExpectedRevision: sale.Revision, Quantity: &quantity, UnitCents: &unit,
+		ShopID: &shop.ID, Note: "修正销售", ChangeReason: "数量修正", EditorID: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("update sale: %v", err)
+	}
+	if !updated.CreatedAt.Equal(createdAt) {
+		t.Fatalf("updated sale date = %s, want %s", updated.CreatedAt, createdAt)
 	}
 	archivedAt := time.Now().UTC()
 	if err := db.Model(&product).Updates(map[string]any{"archived_at": archivedAt, "enabled": false}).Error; err != nil {
@@ -79,14 +101,15 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	shopResponse := getReport(t, router, token, "/api/v1/reports/shop-ranking")
 
 	// Then
-	assertSalesSummaryResponse(t, summaryResponse, 500, 200, 300)
-	assertTrendResponse(t, trendResponse, createdAt.Format("2006-01-02"), 500, 300)
-	assertProductRankingResponse(t, productResponse, "Tea", 500, 2, true)
-	assertShopRankingResponse(t, shopResponse, "Main", 500, 2)
+	assertSalesSummaryResponse(t, summaryResponse, 900, 300, 600)
+	assertTrendResponse(t, trendResponse, createdAt.Format("2006-01-02"), 900, 600)
+	assertProductRankingResponse(t, productResponse, "Tea", "/uploads/tea.png", 900, 3, true)
+	assertShopRankingResponse(t, shopResponse, "Main", 900, 3)
 }
 
 type productRankingRow struct {
 	ProductName      string `json:"product_name"`
+	ProductImagePath string `json:"product_image_path"`
 	Archived         bool   `json:"archived"`
 	RevenueCents     int64  `json:"revenue_cents"`
 	GrossProfitCents int64  `json:"gross_profit_cents"`
@@ -147,7 +170,7 @@ func assertSalesSummaryResponse(t *testing.T, response *httptest.ResponseRecorde
 	}
 }
 
-func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecorder, productName string, revenue int64, quantity int64, archived bool) {
+func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecorder, productName string, imagePath string, revenue int64, quantity int64, archived bool) {
 	t.Helper()
 	if response.Code != http.StatusOK {
 		t.Fatalf("product status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
@@ -161,8 +184,8 @@ func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecor
 	if len(body.Items) != 1 {
 		t.Fatalf("product rows = %d, want 1; body = %s", len(body.Items), response.Body.String())
 	}
-	if body.Items[0].ProductName != productName || body.Items[0].RevenueCents != revenue || body.Items[0].QuantitySold != quantity || body.Items[0].Archived != archived {
-		t.Fatalf("product row = %+v, want %s/%d/%d/archived=%t", body.Items[0], productName, revenue, quantity, archived)
+	if body.Items[0].ProductName != productName || body.Items[0].ProductImagePath != imagePath || body.Items[0].RevenueCents != revenue || body.Items[0].QuantitySold != quantity || body.Items[0].Archived != archived {
+		t.Fatalf("product row = %+v, want %s/%s/%d/%d/archived=%t", body.Items[0], productName, imagePath, revenue, quantity, archived)
 	}
 }
 
@@ -187,7 +210,7 @@ func assertShopRankingResponse(t *testing.T, response *httptest.ResponseRecorder
 
 func newReportTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	return openHandlerTestDB(t, &models.User{}, &models.Session{}, &models.StaffPermission{}, &models.Shop{}, &models.Product{}, &models.StockMovement{}, &models.AuditLog{})
+	return openHandlerTestDB(t, &models.User{}, &models.Session{}, &models.StaffPermission{}, &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{})
 }
 
 func createReportUser(t *testing.T, db *gorm.DB) models.User {

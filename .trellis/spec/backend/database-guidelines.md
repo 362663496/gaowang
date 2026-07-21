@@ -22,10 +22,11 @@
 - Run snapshot and movement writes in the same `DB.Transaction` callback.
 - Lock the product row first, reject `ArchivedAt != nil`, then lock the snapshot. Product archive uses the same product-row → snapshot order so a concurrent write cannot land after archive.
 - Lock an existing snapshot with `clause.Locking{Strength: "UPDATE"}` before changing stock.
-- Append a `StockMovement`; never edit or delete historical movements to correct stock.
+- Normal stock operations append a `StockMovement`. Corrections may update only that product's latest movement through `InventoryService.UpdateMovement`; never update a movement directly from a handler and never delete one.
 - `StockMovement.ShopID` is optional metadata. Inbound may record it, but snapshots remain globally keyed only by `ProductID`; do not infer per-shop stock from movements.
 - Reject outbound or negative adjustments that would make stock negative with `ErrInsufficientStock`.
 - Keep `Quantity`, `MovingAverageCostCents`, and `InventoryValueCents` consistent. When an outbound empties stock, consume the remaining stored value to avoid rounding residue.
+- Latest-movement correction locks product → snapshot → movement, checks `revision`, reverses the saved latest effect, reapplies the shared transition, and writes snapshot, movement, editor fields, and `movement.updated` audit in one transaction.
 
 References: `internal/services/inventory.go` and `internal/services/inventory_test.go`.
 
@@ -46,6 +47,6 @@ Runtime settings use the `settings` key/value table. Database values override en
 ## Avoid
 
 - Stock updates outside `InventoryService` or outside an explicit transaction.
-- Floating-point money, hard deletion of movement history, or a snapshot-only correction.
+- Floating-point money, movement deletion, editing a non-latest movement, or a snapshot-only correction.
 - Adding a model without updating `db.Migrate` and a relevant test database migration.
 - Assuming SQLite proves PostgreSQL-only SQL; keep dialect-specific behavior explicit and exercise production queries when they become critical.

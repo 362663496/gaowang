@@ -25,6 +25,7 @@ const actionOptions = [
   "inventory.inbound",
   "inventory.sales_outbound",
   "inventory.adjustment",
+  "movement.updated",
   "user.create",
   "backup.run_succeeded",
   "backup.run_failed",
@@ -32,7 +33,7 @@ const actionOptions = [
   "permission.updated",
 ] as const;
 
-const resourceOptions = ["auth", "backup", "product", "shop", "setting", "user", "permission"] as const;
+const resourceOptions = ["auth", "backup", "product", "stock_movement", "shop", "setting", "user", "permission"] as const;
 
 export default function AuditLogsPage() {
   const { hasPermission } = useSession();

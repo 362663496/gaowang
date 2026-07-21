@@ -106,9 +106,9 @@ type InventorySnapshot struct {
 }
 
 type StockMovement struct {
-	ID                  uuid.UUID    `gorm:"type:uuid;primaryKey"`
+	ID                  uuid.UUID    `gorm:"type:uuid;primaryKey;index:idx_stock_movements_product_order,priority:3"`
 	Type                MovementType `gorm:"type:varchar(32);not null;index"`
-	ProductID           uuid.UUID    `gorm:"type:uuid;not null;index"`
+	ProductID           uuid.UUID    `gorm:"type:uuid;not null;index;index:idx_stock_movements_product_order,priority:1"`
 	Product             Product      `gorm:"foreignKey:ProductID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
 	ShopID              *uuid.UUID   `gorm:"type:uuid;index"`
 	Shop                *Shop        `gorm:"foreignKey:ShopID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
@@ -121,9 +121,14 @@ type StockMovement struct {
 	CostAmountCents     int64 `gorm:"not null;default:0"`
 	GrossProfitCents    int64 `gorm:"not null;default:0"`
 	Reason              string
-	OperatorID          uuid.UUID `gorm:"type:uuid;not null;index"`
-	Operator            User      `gorm:"foreignKey:OperatorID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	CreatedAt           time.Time
+	OperatorID          uuid.UUID  `gorm:"type:uuid;not null;index"`
+	Operator            User       `gorm:"foreignKey:OperatorID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Revision            int64      `gorm:"not null;default:1"`
+	LastEditedByID      *uuid.UUID `gorm:"type:uuid;index"`
+	LastEditedBy        *User      `gorm:"foreignKey:LastEditedByID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+	CreatedAt           time.Time  `gorm:"index:idx_stock_movements_product_order,priority:2"`
+	UpdatedAt           time.Time
+	IsLatest            bool `gorm:"-"`
 }
 
 func (m *StockMovement) BeforeCreate(_ *gorm.DB) error {

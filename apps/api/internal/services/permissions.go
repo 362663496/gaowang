@@ -22,6 +22,7 @@ const (
 	PermInventorySalesOutbound = "inventory.sales_outbound"
 	PermInventoryAdjust        = "inventory.adjust"
 	PermMovementRead           = "movement.read"
+	PermMovementUpdate         = "movement.update"
 	PermReportSalesSummary     = "report.sales_summary"
 	PermReportSalesTrend       = "report.sales_trend"
 	PermReportProductRanking   = "report.product_ranking"
@@ -59,6 +60,7 @@ var permissionCatalog = []PermissionDef{
 	{Key: PermInventorySalesOutbound, Module: "inventory", ModuleLabel: "库存", ActionLabel: "销售出库", StaffAssignable: true, Requires: []string{PermInventoryRead, PermShopRead}},
 	{Key: PermInventoryAdjust, Module: "inventory", ModuleLabel: "库存", ActionLabel: "调整", StaffAssignable: true, Requires: []string{PermInventoryRead}},
 	{Key: PermMovementRead, Module: "movement", ModuleLabel: "流水", ActionLabel: "查看", StaffAssignable: true, Requires: []string{PermProductRead, PermShopRead}},
+	{Key: PermMovementUpdate, Module: "movement", ModuleLabel: "流水", ActionLabel: "编辑", StaffAssignable: true, Requires: []string{PermMovementRead}},
 	{Key: PermReportSalesSummary, Module: "report", ModuleLabel: "报表", ActionLabel: "销售汇总", StaffAssignable: true},
 	{Key: PermReportSalesTrend, Module: "report", ModuleLabel: "报表", ActionLabel: "销售趋势", StaffAssignable: true},
 	{Key: PermReportProductRanking, Module: "report", ModuleLabel: "报表", ActionLabel: "商品排行", StaffAssignable: true},

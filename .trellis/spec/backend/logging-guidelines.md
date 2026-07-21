@@ -23,7 +23,7 @@ User and domain mutations are persisted as `models.AuditLog` through `recordAudi
 - Action names use `<resource>.<past-tense-action>`, for example `product.create`, `inventory.sales_outbound`, and `backup.run_failed`.
 - Store resource type, resource ID, actor when known, client IP, and a small `map[string]string` of useful metadata.
 - Record both successful and security-relevant failed actions when the current handlers do so; login is the reference.
-- Audit writes are best effort and must not replace the primary operation response.
+- Audit writes are normally best effort. `InventoryService.UpdateMovement` is the exception: its complete before/after/impact audit is part of the same transaction, so an audit failure rolls back the correction.
 
 ## Never Log
 

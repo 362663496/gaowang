@@ -67,17 +67,20 @@ func (h ProductHandler) Create(c *gin.Context) {
 		return
 	}
 	file, header, err := c.Request.FormFile("image")
-	if err == nil {
-		defer func() { _ = file.Close() }()
-		path, err := services.SaveProductImage(h.Cfg.UploadDir, file, header)
-		if err != nil {
-			writeError(c, http.StatusBadRequest, "UPLOAD_INVALID", err.Error())
-			return
-		}
-		product.ImagePath = path
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION", "商品图片为必填项")
+		return
 	}
+	defer func() { _ = file.Close() }()
+	path, err := services.SaveProductImage(h.Cfg.UploadDir, file, header)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "UPLOAD_INVALID", err.Error())
+		return
+	}
+	product.ImagePath = path
 	if err := h.DB.Create(&product).Error; err != nil {
-		writeError(c, http.StatusBadRequest, "PRODUCT_CREATE_FAILED", err.Error())
+		removeProductImage(h.Cfg.UploadDir, product.ImagePath)
+		writeError(c, http.StatusBadRequest, "PRODUCT_CREATE_FAILED", "商品编码已存在或数据无效")
 		return
 	}
 	recordAudit(c, h.DB, "product.create", "product", product.ID.String(), map[string]string{"code": product.Code, "name": product.Name})

@@ -19,6 +19,17 @@ func Test_ExpandPermissionClosure_includes_transitive_deps(t *testing.T) {
 	}
 }
 
+func Test_ExpandPermissionClosure_movement_update_requires_read_dependencies(t *testing.T) {
+	got, err := ExpandPermissionClosure([]string{PermMovementUpdate})
+	if err != nil {
+		t.Fatalf("ExpandPermissionClosure() error = %v", err)
+	}
+	want := []string{PermMovementRead, PermMovementUpdate, PermProductRead, PermShopRead}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
 func Test_ExpandPermissionClosure_rejects_unknown_and_admin_only(t *testing.T) {
 	if _, err := ExpandPermissionClosure([]string{"nope.read"}); err == nil {
 		t.Fatal("expected unknown permission error")
