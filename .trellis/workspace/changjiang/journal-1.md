@@ -139,3 +139,37 @@ Completed database-backed cookie sessions, explicit route permissions, staff per
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 流水修订与图片优先发布
+
+**Date**: 2026-07-22
+**Task**: 流水修订与图片优先发布
+**Branch**: `master`
+
+### Summary
+
+实现最新库存流水事务性修订、完整审计和图片优先商品交互；本地构建 linux/amd64 release，备份后原子发布到 aliyun 20260722013700，并固化服务器只接收成品的部署规范。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81ed7ae` | (see git log) |
+| `04af479` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
