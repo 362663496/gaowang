@@ -7,6 +7,7 @@ import (
 	"gaowang/apps/api/internal/config"
 	"gaowang/apps/api/internal/db"
 	apihttp "gaowang/apps/api/internal/http"
+	"gaowang/apps/api/internal/services"
 )
 
 func main() {
@@ -35,6 +36,12 @@ func main() {
 
 	if err := db.Migrate(database); err != nil {
 		slog.Error("migrate database", slog.Any("err", err))
+		os.Exit(1)
+	}
+
+	if err := services.EnsureBootstrapAdmin(database, cfg.InitialAdminName, cfg.InitialAdminEmail, cfg.InitialAdminPassword); err != nil {
+		// Never log the initial password value.
+		slog.Error("bootstrap admin", slog.Any("err", err))
 		os.Exit(1)
 	}
 

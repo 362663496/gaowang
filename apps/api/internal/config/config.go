@@ -30,6 +30,10 @@ type Config struct {
 	SMTPFrom                string
 	SMTPTo                  string
 	SMTPTLS                 string
+	InitialAdminName        string
+	InitialAdminEmail       string
+	InitialAdminPassword    string
+	SessionCookieSecure     bool
 }
 
 func Load() (Config, error) {
@@ -53,6 +57,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	sessionCookieSecure, err := envBool("SESSION_COOKIE_SECURE", false)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		APIAddr:                 envString("API_ADDR", ":8080"),
 		DatabaseURL:             databaseURL,
@@ -68,6 +77,10 @@ func Load() (Config, error) {
 		SMTPFrom:                envString("SMTP_FROM", "backup@example.com"),
 		SMTPTo:                  envString("SMTP_TO", "owner@example.com"),
 		SMTPTLS:                 envString("SMTP_TLS", "starttls"),
+		InitialAdminName:        envString("INITIAL_ADMIN_NAME", ""),
+		InitialAdminEmail:       envString("INITIAL_ADMIN_EMAIL", ""),
+		InitialAdminPassword:    envString("INITIAL_ADMIN_PASSWORD", ""),
+		SessionCookieSecure:     sessionCookieSecure,
 	}
 
 	if len([]byte(cfg.AuthSecret)) < minAuthSecretBytes {
@@ -94,6 +107,18 @@ func envInt(key string, fallback int) (int, error) {
 	value, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+	return value, nil
+}
+
+func envBool(key string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean: %w", key, err)
 	}
 	return value, nil
 }

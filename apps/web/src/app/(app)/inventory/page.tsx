@@ -4,6 +4,7 @@ import { DownloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Col, Flex, Input, Row, Statistic, Table, Tag, type TableProps } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
+import { useSession } from "@/components/layout/session-context";
 import { InventoryActions } from "@/features/inventory/action-forms";
 import { StockBadge } from "@/features/labels";
 import { initialPagination, tablePagination } from "@/features/pagination";
@@ -14,6 +15,12 @@ import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 
 export default function InventoryPage() {
   const { message } = App.useApp();
+  const { hasPermission } = useSession();
+  const canInbound = hasPermission("inventory.inbound");
+  const canOutbound = hasPermission("inventory.sales_outbound");
+  const canAdjust = hasPermission("inventory.adjust");
+  const canLoadProducts = hasPermission("product.read");
+  const canLoadShops = hasPermission("shop.read");
   const [inventory, setInventory] = useState<InventorySnapshot[]>([]);
   const [visibleInventory, setVisibleInventory] = useState<InventorySnapshot[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -36,8 +43,8 @@ export default function InventoryPage() {
       const [visibleStock, stock, productList, shopList] = await Promise.all([
         apiGet<Paginated<InventorySnapshot>>(`/inventory?${listParams}`),
         apiGet<Paginated<InventorySnapshot>>("/inventory?all=true"),
-        apiGet<Paginated<Product>>("/products?all=true"),
-        apiGet<Paginated<Shop>>("/shops?all=true"),
+        canLoadProducts ? apiGet<Paginated<Product>>("/products?all=true") : Promise.resolve({ items: [] as Product[] }),
+        canLoadShops ? apiGet<Paginated<Shop>>("/shops?all=true") : Promise.resolve({ items: [] as Shop[] }),
       ]);
       setVisibleInventory(visibleStock.items);
       setPagination(visibleStock.pagination);
@@ -50,7 +57,7 @@ export default function InventoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, query, showLowStock]);
+  }, [canLoadProducts, canLoadShops, page, query, showLowStock]);
 
   useEffect(() => {
     void load();
@@ -127,7 +134,15 @@ export default function InventoryPage() {
                 setPage(1);
               }}
             />
-            <InventoryActions inventory={inventory} products={products} shops={shops} onDone={done} />
+            <InventoryActions
+              canAdjust={canAdjust}
+              canInbound={canInbound}
+              canOutbound={canOutbound}
+              inventory={inventory}
+              products={products}
+              shops={shops}
+              onDone={done}
+            />
             <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportExcel()}>
               导出 Excel
             </Button>

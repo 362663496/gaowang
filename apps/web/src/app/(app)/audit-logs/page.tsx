@@ -4,6 +4,7 @@ import { ClearOutlined, SearchOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Col, Flex, Form, Input, Row, Select, Space, Table, Tooltip, type TableProps } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
+import { useSession } from "@/components/layout/session-context";
 import { AuditActionBadge, auditActionLabel, auditResourceLabel } from "@/features/labels";
 import { initialPagination, tablePagination } from "@/features/pagination";
 import type { AuditLog, Paginated, User } from "@/features/types";
@@ -28,11 +29,14 @@ const actionOptions = [
   "backup.run_succeeded",
   "backup.run_failed",
   "settings.update",
+  "permission.updated",
 ] as const;
 
-const resourceOptions = ["auth", "backup", "product", "shop", "setting", "user"] as const;
+const resourceOptions = ["auth", "backup", "product", "shop", "setting", "user", "permission"] as const;
 
 export default function AuditLogsPage() {
+  const { hasPermission } = useSession();
+  const canReadUsers = hasPermission("user.read");
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [actorID, setActorID] = useState("");
@@ -63,7 +67,7 @@ export default function AuditLogsPage() {
     try {
       const [auditList, userList] = await Promise.all([
         apiGet<Paginated<AuditLog>>(`/audit-logs?${params}`),
-        apiGet<Paginated<User>>("/users?all=true"),
+        canReadUsers ? apiGet<Paginated<User>>("/users?all=true") : Promise.resolve({ items: [] as User[] }),
       ]);
       setLogs(auditList.items);
       setPagination(auditList.pagination);
@@ -74,7 +78,7 @@ export default function AuditLogsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, params]);
+  }, [canReadUsers, page, params]);
 
   useEffect(() => {
     void load();
@@ -125,19 +129,21 @@ export default function AuditLogsPage() {
       <Card className="filter-card">
         <Form layout="vertical" requiredMark={false}>
           <Row gutter={[14, 0]}>
-            <Col lg={4} md={8} sm={12} xs={24}>
-              <Form.Item label="人员">
-                <Select
-                  allowClear
-                  optionFilterProp="label"
-                  options={users.map((user) => ({ value: user.id, label: user.name || user.email }))}
-                  placeholder="全部人员"
-                  showSearch
-                  value={actorID || undefined}
-                  onChange={(value) => { setActorID(value ?? ""); setPage(1); }}
-                />
-              </Form.Item>
-            </Col>
+            {canReadUsers ? (
+              <Col lg={4} md={8} sm={12} xs={24}>
+                <Form.Item label="人员">
+                  <Select
+                    allowClear
+                    optionFilterProp="label"
+                    options={users.map((user) => ({ value: user.id, label: user.name || user.email }))}
+                    placeholder="全部人员"
+                    showSearch
+                    value={actorID || undefined}
+                    onChange={(value) => { setActorID(value ?? ""); setPage(1); }}
+                  />
+                </Form.Item>
+              </Col>
+            ) : null}
             <Col lg={4} md={8} sm={12} xs={24}>
               <Form.Item label="动作">
                 <Select

@@ -6,31 +6,26 @@ import (
 	"image/color"
 	"image/png"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"gaowang/apps/api/internal/config"
 	apihttp "gaowang/apps/api/internal/http"
 	"gaowang/apps/api/internal/models"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func Test_InventoryExport_embeds_images_and_respects_low_stock_filter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	db := newInventoryExportTestDB(t)
+	db := openHandlerTestDB(t, append(authModels(), &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{})...)
 	user := models.User{Name: "Admin", Email: "export@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	token := createSessionToken(t, db, user.ID)
 
 	uploadDir := t.TempDir()
 	imageName := "tea.png"
@@ -68,10 +63,12 @@ func Test_InventoryExport_embeds_images_and_respects_low_stock_filter(t *testing
 		}
 	}
 
-	router := apihttp.NewRouter(config.Config{UploadDir: uploadDir}, db)
+	cfg := testConfig()
+	cfg.UploadDir = uploadDir
+	router := apihttp.NewRouter(cfg, db)
 
 	// When exporting all active inventory
-	allResponse := inventoryExportRequest(router, user.ID, "/api/v1/inventory/export")
+	allResponse := doJSON(t, router, http.MethodGet, "/api/v1/inventory/export", token, nil)
 	if allResponse.Code != http.StatusOK {
 		t.Fatalf("export status = %d, want 200; body = %s", allResponse.Code, allResponse.Body.String())
 	}
@@ -147,7 +144,7 @@ func Test_InventoryExport_embeds_images_and_respects_low_stock_filter(t *testing
 	}
 
 	// When exporting low stock only
-	lowResponse := inventoryExportRequest(router, user.ID, "/api/v1/inventory/export?low_stock=true")
+	lowResponse := doJSON(t, router, http.MethodGet, "/api/v1/inventory/export?low_stock=true", token, nil)
 	if lowResponse.Code != http.StatusOK {
 		t.Fatalf("low stock export status = %d, want 200; body = %s", lowResponse.Code, lowResponse.Body.String())
 	}
@@ -169,27 +166,6 @@ func Test_InventoryExport_embeds_images_and_respects_low_stock_filter(t *testing
 	if got := cellText(lowRows, 1, 2); got != "TEA-RED" {
 		t.Fatalf("low stock code = %q, want TEA-RED", got)
 	}
-}
-
-func newInventoryExportTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&models.User{}, &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{}); err != nil {
-		t.Fatalf("migrate sqlite: %v", err)
-	}
-	return db
-}
-
-func inventoryExportRequest(router http.Handler, userID uuid.UUID, path string) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(http.MethodGet, path, nil)
-	request.Header.Set("X-Dev-User-ID", userID.String())
-	request.Header.Set("X-Dev-Role", string(models.RoleAdmin))
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-	return response
 }
 
 func writeSolidPNG(path string, width, height int, c color.RGBA) error {

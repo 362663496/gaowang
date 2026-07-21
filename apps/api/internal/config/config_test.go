@@ -94,3 +94,34 @@ func Test_Load_returns_error_when_auth_secret_missing(t *testing.T) {
 		t.Fatalf("Load() error = %v, want %v", err, ErrAuthSecretTooShort)
 	}
 }
+
+func Test_Load_reads_session_and_initial_admin_fields(t *testing.T) {
+	t.Setenv("DATABASE_URL", "host=localhost user=gaowang dbname=gaowang sslmode=disable")
+	t.Setenv("AUTH_SECRET", "abcdefghijklmnopqrstuvwxyz123456")
+	t.Setenv("SESSION_COOKIE_SECURE", "true")
+	t.Setenv("INITIAL_ADMIN_NAME", "Root")
+	t.Setenv("INITIAL_ADMIN_EMAIL", "root@example.com")
+	t.Setenv("INITIAL_ADMIN_PASSWORD", "password123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.SessionCookieSecure {
+		t.Fatal("SessionCookieSecure = false, want true")
+	}
+	if cfg.InitialAdminName != "Root" || cfg.InitialAdminEmail != "root@example.com" || cfg.InitialAdminPassword != "password123" {
+		t.Fatalf("initial admin fields = %+v", cfg)
+	}
+}
+
+func Test_Load_returns_error_when_session_cookie_secure_invalid(t *testing.T) {
+	t.Setenv("DATABASE_URL", "host=localhost user=gaowang dbname=gaowang sslmode=disable")
+	t.Setenv("AUTH_SECRET", "abcdefghijklmnopqrstuvwxyz123456")
+	t.Setenv("SESSION_COOKIE_SECURE", "maybe")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "SESSION_COOKIE_SECURE must be a boolean") {
+		t.Fatalf("Load() error = %v, want SESSION_COOKIE_SECURE boolean error", err)
+	}
+}

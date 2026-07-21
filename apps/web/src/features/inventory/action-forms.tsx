@@ -13,18 +13,29 @@ type Props = {
   shops: Shop[];
   inventory: InventorySnapshot[];
   onDone: (message: string) => void;
+  canInbound?: boolean;
+  canOutbound?: boolean;
+  canAdjust?: boolean;
 };
 
 type InboundValues = { product_id: string; shop_id?: string; quantity: number; unit_yuan: number };
 type OutboundValues = { product_id: string; shop_id: string; quantity: number; sale_yuan: number };
 type AdjustmentValues = { product_id: string; quantity_delta: number; reason: string };
 
-export function InventoryActions({ products, shops, inventory, onDone }: Props) {
+export function InventoryActions({
+  products,
+  shops,
+  inventory,
+  onDone,
+  canInbound = true,
+  canOutbound = true,
+  canAdjust = true,
+}: Props) {
   return (
     <Space wrap>
-      <InboundForm products={products} shops={shops} onDone={onDone} />
-      <OutboundForm inventory={inventory} products={products} shops={shops} onDone={onDone} />
-      <AdjustmentForm products={products} onDone={onDone} />
+      {canInbound ? <InboundForm products={products} shops={shops} onDone={onDone} /> : null}
+      {canOutbound ? <OutboundForm inventory={inventory} products={products} shops={shops} onDone={onDone} /> : null}
+      {canAdjust ? <AdjustmentForm products={products} onDone={onDone} /> : null}
     </Space>
   );
 }

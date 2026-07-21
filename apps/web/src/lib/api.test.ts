@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiDeleteSession, apiDownload, apiGet, apiPost, readDevSession, writeDevSession } from "./api";
+import { ApiError, apiDownload, apiGet, apiPost, permissionsRefreshEvent, sessionExpiredEvent } from "./api";
 
 const originalFetch = globalThis.fetch;
-const store = new Map<string, string>();
 let locationAssign: ReturnType<typeof vi.fn>;
+let dispatchEvent: ReturnType<typeof vi.fn>;
 let createObjectURL: ReturnType<typeof vi.fn>;
 let revokeObjectURL: ReturnType<typeof vi.fn>;
 let appendChild: ReturnType<typeof vi.fn>;
@@ -11,19 +11,17 @@ let click: ReturnType<typeof vi.fn>;
 let remove: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  store.clear();
   locationAssign = vi.fn();
+  dispatchEvent = vi.fn();
   createObjectURL = vi.fn(() => "blob:inventory");
   revokeObjectURL = vi.fn();
   click = vi.fn();
   remove = vi.fn();
   appendChild = vi.fn();
-  const localStorage = {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => store.set(key, value),
-    removeItem: (key: string) => store.delete(key),
-  };
-  vi.stubGlobal("window", { localStorage, dispatchEvent: vi.fn(), location: { pathname: "/dashboard", assign: locationAssign } });
+  vi.stubGlobal("window", {
+    dispatchEvent,
+    location: { pathname: "/dashboard", assign: locationAssign },
+  });
   vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
   vi.stubGlobal("document", {
     createElement: vi.fn(() => ({
@@ -44,8 +42,7 @@ afterEach(() => {
 });
 
 describe("api client", () => {
-  it("sends stored development auth headers", async () => {
-    writeDevSession({ userId: "00000000-0000-0000-0000-000000000001", role: "admin" });
+  it("sends credentials and does not attach development headers", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
     globalThis.fetch = fetchMock;
 
@@ -54,12 +51,17 @@ describe("api client", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/products",
       expect.objectContaining({
-        headers: expect.objectContaining({
-          "X-Dev-Role": "admin",
-          "X-Dev-User-ID": "00000000-0000-0000-0000-000000000001",
+        credentials: "include",
+        headers: expect.not.objectContaining({
+          "X-Dev-Role": expect.anything(),
+          "X-Dev-User-ID": expect.anything(),
         }),
       }),
     );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const headers = init.headers as Record<string, string> | undefined;
+    expect(headers?.["X-Dev-User-ID"]).toBeUndefined();
+    expect(headers?.["X-Dev-Role"]).toBeUndefined();
   });
 
   it("throws structured API errors", async () => {
@@ -74,25 +76,22 @@ describe("api client", () => {
     });
   });
 
-  it("clears the session and redirects to login when auth expires", async () => {
-    writeDevSession({ userId: "00000000-0000-0000-0000-000000000001", role: "admin" });
+  it("redirects on 401 and keeps session on 403", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "login required" } }), { status: 401 }),
     );
-
     await expect(apiGet("/users")).rejects.toMatchObject({ status: 401 });
-
-    expect(readDevSession()).toEqual({ userId: "", role: "admin" });
     expect(locationAssign).toHaveBeenCalledWith("/login");
-  });
+    expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: sessionExpiredEvent }));
 
-  it("stores and clears the development session", () => {
-    writeDevSession({ userId: "00000000-0000-0000-0000-000000000002", role: "staff" });
-    expect(readDevSession()).toEqual({ userId: "00000000-0000-0000-0000-000000000002", role: "staff" });
-
-    apiDeleteSession();
-
-    expect(readDevSession()).toEqual({ userId: "", role: "admin" });
+    locationAssign.mockClear();
+    dispatchEvent.mockClear();
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "FORBIDDEN", message: "permission denied" } }), { status: 403 }),
+    );
+    await expect(apiGet("/products")).rejects.toMatchObject({ status: 403 });
+    expect(locationAssign).not.toHaveBeenCalled();
+    expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: permissionsRefreshEvent }));
   });
 
   it("exposes an error class for UI state", () => {
@@ -102,7 +101,6 @@ describe("api client", () => {
   });
 
   it("downloads authenticated blobs and revokes the object URL", async () => {
-    writeDevSession({ userId: "00000000-0000-0000-0000-000000000001", role: "staff" });
     const blob = new Blob(["xlsx-bytes"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(blob, {
@@ -122,12 +120,9 @@ describe("api client", () => {
       expect.objectContaining({
         method: "GET",
         credentials: "include",
-        headers: expect.objectContaining({
-          "X-Dev-Role": "staff",
-          "X-Dev-User-ID": "00000000-0000-0000-0000-000000000001",
-        }),
       }),
     );
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).toBeUndefined();
     expect(createObjectURL).toHaveBeenCalled();
     expect(appendChild).toHaveBeenCalled();
     expect(click).toHaveBeenCalled();

@@ -5,8 +5,20 @@ Self-hosted lightweight inventory admin system.
 ## Local Setup
 
 1. Copy `.env.example` to `.env`.
-2. Run `make compose-up`.
-3. Open `http://localhost:3000` for the web app, or `http://localhost` through Nginx.
+2. Set a long `AUTH_SECRET` (at least 32 bytes).
+3. For a brand-new database, set `INITIAL_ADMIN_NAME`, `INITIAL_ADMIN_EMAIL`, and `INITIAL_ADMIN_PASSWORD` (password ≥ 8 chars). Leave them empty if users already exist.
+4. Keep `SESSION_COOKIE_SECURE=false` for plain HTTP local access.
+5. Run `make compose-up`.
+6. Open `http://localhost:3000` for the web app, or `http://localhost` through Nginx.
+7. After the first successful login, remove `INITIAL_ADMIN_PASSWORD` from `.env` and recreate/restart the API container.
+
+## Auth And Permissions
+
+- Login uses an HTTP-only cookie session (`gaowang_session`) stored as a hashed token in PostgreSQL. Sessions last 7 days.
+- Roles are fixed: `admin` and `staff`. Admin always has every permission.
+- Staff start with zero business permissions after upgrade or first deploy. An admin must open **权限管理** and grant access.
+- Product delete is an independent permission from create/edit/toggle.
+- API and Web must be deployed together; old development `X-Dev-*` headers are ignored.
 
 ## Core Commands
 
@@ -20,11 +32,14 @@ Self-hosted lightweight inventory admin system.
 ## Deployment
 
 1. Copy `.env.example` to `.env` and set production values, especially `AUTH_SECRET`, `POSTGRES_PASSWORD`, SMTP settings, and `HTTP_PORT`.
-2. Point DNS to the server.
-3. Run `docker compose up --build -d`.
-4. Put HTTPS in front of Nginx with your certificate manager or cloud load balancer.
+2. Confirm the target database already has at least one enabled admin, or provide `INITIAL_ADMIN_*` for an empty database only.
+3. Back up the database before upgrade.
+4. Set `SESSION_COOKIE_SECURE=true` and serve the site over HTTPS. Nginx must forward `X-Forwarded-Proto` (see `deploy/nginx/app.conf`).
+5. Deploy API and Web from the same release; staff users will have zero permissions until an admin configures them.
+6. Point DNS to the server and run `docker compose up --build -d`.
+7. Remove `INITIAL_ADMIN_PASSWORD` after the first successful bootstrap.
 
-The Compose stack runs PostgreSQL, the Go API, the Next.js web app, and Nginx. Nginx routes `/api` to the API, `/uploads` to the shared uploads volume, and all other paths to the web app.
+The Compose stack runs PostgreSQL, the Go API, the Next.js web app, and Nginx. Nginx routes `/api` to the API, `/uploads` to the shared uploads volume, and all other paths to the web app. Product image uploads under `/uploads/*` remain publicly readable.
 
 ## Restore
 

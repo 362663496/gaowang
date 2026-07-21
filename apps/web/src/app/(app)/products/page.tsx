@@ -26,6 +26,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { tablePagination, initialPagination } from "@/features/pagination";
 import { ProductImage } from "@/features/product-image";
 import type { Paginated, Product } from "@/features/types";
+import { useSession } from "@/components/layout/session-context";
 import { apiGet, apiPost, request } from "@/lib/api";
 import { centsToYuanInput, formatMoney, formatQuantity, yuanToCents } from "@/lib/format";
 
@@ -44,6 +45,11 @@ type ProductFormValues = {
 
 export default function ProductsPage() {
   const { message, modal } = App.useApp();
+  const { hasPermission } = useSession();
+  const canCreate = hasPermission("product.create");
+  const canUpdate = hasPermission("product.update");
+  const canToggle = hasPermission("product.toggle");
+  const canDelete = hasPermission("product.delete");
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -152,25 +158,29 @@ export default function ProductsPage() {
       width: 260,
       render: (_, product) => (
         <Space size={4}>
-          <Button disabled={busyAction !== null} icon={<EditOutlined />} size="small" onClick={() => setEditing(product)}>修改</Button>
-          <Button
-            disabled={busyAction !== null}
-            icon={<PoweroffOutlined />}
-            loading={busyAction?.productID === product.ID && busyAction.type === "status"}
-            size="small"
-            onClick={() => void setProductEnabled(product)}
-          >
-            {product.Enabled ? "禁用" : "启用"}
-          </Button>
-          <Button
-            danger
-            disabled={busyAction !== null}
-            icon={<DeleteOutlined />}
-            loading={busyAction?.productID === product.ID && busyAction.type === "delete"}
-            size="small"
-            type="text"
-            onClick={() => confirmDelete(product)}
-          >删除</Button>
+          {canUpdate ? <Button disabled={busyAction !== null} icon={<EditOutlined />} size="small" onClick={() => setEditing(product)}>修改</Button> : null}
+          {canToggle ? (
+            <Button
+              disabled={busyAction !== null}
+              icon={<PoweroffOutlined />}
+              loading={busyAction?.productID === product.ID && busyAction.type === "status"}
+              size="small"
+              onClick={() => void setProductEnabled(product)}
+            >
+              {product.Enabled ? "禁用" : "启用"}
+            </Button>
+          ) : null}
+          {canDelete ? (
+            <Button
+              danger
+              disabled={busyAction !== null}
+              icon={<DeleteOutlined />}
+              loading={busyAction?.productID === product.ID && busyAction.type === "delete"}
+              size="small"
+              type="text"
+              onClick={() => confirmDelete(product)}
+            >删除</Button>
+          ) : null}
         </Space>
       ),
     },
@@ -179,7 +189,7 @@ export default function ProductsPage() {
   return (
     <Flex gap={20} vertical>
       <PageHeader
-        actions={<Button icon={<PlusOutlined />} type="primary" onClick={() => setCreating(true)}>新增商品</Button>}
+        actions={canCreate ? <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreating(true)}>新增商品</Button> : null}
         description="管理商品图片、编码、默认价格和低库存阈值。"
         title="商品"
       />

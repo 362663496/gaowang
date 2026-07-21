@@ -1,4 +1,65 @@
-# HTTP Collection And Mutation Contracts
+# HTTP Contracts
+
+## Scenario: Browser Sessions And Explicit Business Permissions
+
+### 1. Scope / Trigger
+
+Use this contract for authentication, permission changes, or any new protected route under `/api/v1`. The repository web app is the only authenticated client; scripts and third-party clients do not receive a separate token protocol.
+
+### 2. Signatures
+
+- Session APIs: `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`, `POST /auth/password`.
+- Permission APIs: `GET /permissions`, `PUT /permissions` with `{"permissions":["product.read"]}`.
+- Middleware: `RequireSameOrigin()`, `RequireAuth(db, cfg)`, `RequirePermission(permission)`.
+- Database: `sessions(token_hash, user_id, expires_at, created_at)` and `staff_permissions(permission, created_at)`.
+- Read-only exports reuse their domain read permission; for example, `GET /inventory/export` requires `inventory.read`.
+
+### 3. Contracts
+
+- Login creates a 32-byte random token and returns `{"user":{"id","name","email","role"},"permissions":[]}`. Only the `HMAC-SHA256(AUTH_SECRET, token)` hex hash is stored.
+- The browser receives `gaowang_session` with `Path=/api/v1`, `HttpOnly`, `SameSite=Strict`, and a fixed seven-day lifetime. Set `Secure` from `SESSION_COOKIE_SECURE`, TLS, or trusted `X-Forwarded-Proto: https`.
+- Requests use `credentials: "include"`; identity, role, and token are never stored in browser-readable storage or supplied through development headers.
+- `admin` receives the full code catalog. `staff` receives only known assignable rows from `staff_permissions`; permission writes validate keys and expand dependencies before replacing rows and recording `permission.updated` in the same transaction.
+- Account routes require only a valid session. Every business route declares one `RequirePermission(...)` at registration; handlers do not branch on roles.
+- `POST`, `PUT`, `PATCH`, and `DELETE` require an `Origin` matching the direct or forwarded scheme and host.
+- The web client treats `401` as session expiry and redirects to `/login`; `403` emits `gaowang:permissions-refresh`, preserves the session, and surfaces the original error.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| Missing, unknown, expired session or disabled user | `401 UNAUTHORIZED`, clear the Cookie |
+| Invalid login credentials | `401 INVALID_CREDENTIALS` |
+| Wrong current password on a valid session | `400 INVALID_CREDENTIALS`, keep the session |
+| Missing business permission | `403 FORBIDDEN`, keep the session |
+| Missing, malformed, or cross-origin mutation `Origin` | `403 FORBIDDEN` before the handler |
+| Unknown or admin-only key in a staff permission update | `400 VALIDATION` |
+| Session or permission persistence failure | `500 INTERNAL` without token, password, or secret details |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a staff user with `inventory.read` can list and export inventory; a user without it gets `403` from both routes.
+- Base: a zero-permission staff user can still call `/auth/me`, change a password, and log out.
+- Bad: a new business route is mounted behind authentication only, or a client handles `403` by logging the user out.
+
+### 6. Tests Required
+
+- Assert login sets an `HttpOnly` Cookie and the database contains only its HMAC hash.
+- Assert forged development headers, expired/deleted sessions, and disabled users do not authenticate.
+- Assert same-origin mutation handling, current-session logout, and all-session password revocation.
+- Enumerate registered routes with a valid zero-permission staff session; every non-public, non-account business route must return `403`.
+- Assert permission dependency closure, unknown/admin-only rejection, atomic audit metadata, and independent destructive permissions.
+- Assert the web API client sends Cookie credentials, redirects only on `401`, refreshes permissions on `403`, and applies the same behavior to downloads.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: authenticated staff can reach a new business handler without policy.
+group.GET("/inventory/export", inventoryHandler.ExportCurrent)
+
+// Correct: route registration is the explicit policy map.
+group.GET("/inventory/export", RequirePermission(services.PermInventoryRead), inventoryHandler.ExportCurrent)
+```
 
 ## Scenario: Paginated Collection Endpoints
 

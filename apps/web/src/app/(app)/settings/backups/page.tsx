@@ -6,11 +6,14 @@ import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { BackupStatusBadge } from "@/features/labels";
 import type { BackupJob } from "@/features/types";
+import { useSession } from "@/components/layout/session-context";
 import { apiGet, apiPost } from "@/lib/api";
 import { formatDateTime, formatFileSize } from "@/lib/format";
 
 export default function BackupsPage() {
   const { message } = App.useApp();
+  const { hasPermission } = useSession();
+  const canRun = hasPermission("backup.run");
   const [job, setJob] = useState<BackupJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -49,7 +52,7 @@ export default function BackupsPage() {
   return (
     <Flex gap={20} vertical>
       <PageHeader
-        actions={<Button icon={<PlayCircleOutlined />} loading={running} type="primary" onClick={() => void runBackup()}>立即备份</Button>}
+        actions={canRun ? <Button icon={<PlayCircleOutlined />} loading={running} type="primary" onClick={() => void runBackup()}>立即备份</Button> : null}
         description="查看数据库备份和邮件发送状态。"
         title="备份"
       />

@@ -1,14 +1,20 @@
 export type Role = "admin" | "staff";
 
-export type DevSession = {
-  userId: string;
+export type SessionUser = {
+  id: string;
+  name: string;
+  email: string;
   role: Role;
 };
 
+export type AuthPayload = {
+  user: SessionUser;
+  permissions: string[];
+};
+
 const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
-const sessionKey = "gaowang.devSession";
-export const devSessionEvent = "gaowang:dev-session";
-const emptySession: DevSession = { userId: "", role: "admin" };
+export const sessionExpiredEvent = "gaowang:session-expired";
+export const permissionsRefreshEvent = "gaowang:permissions-refresh";
 
 export class ApiError extends Error {
   constructor(
@@ -37,16 +43,9 @@ export async function apiDownload(path: string, fallbackFilename: string): Promi
   const response = await fetch(`${baseUrl}${path}`, {
     method: "GET",
     credentials: "include",
-    headers: {
-      ...devHeaders(),
-    },
   });
   if (!response.ok) {
-    const error = await readError(response);
-    if (error.status === 401 || error.status === 403) {
-      redirectToLogin();
-    }
-    throw error;
+    await throwResponseError(response);
   }
   const blob = await response.blob();
   const filename = filenameFromContentDisposition(response.headers.get("Content-Disposition")) ?? fallbackFilename;
@@ -64,21 +63,24 @@ export async function apiDownload(path: string, fallbackFilename: string): Promi
   }
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
 export async function request<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     credentials: "include",
     headers: {
-      ...devHeaders(),
       ...init.headers,
     },
   });
   if (!response.ok) {
-    const error = await readError(response);
-    if (error.status === 401 || error.status === 403) {
-      redirectToLogin();
-    }
-    throw error;
+    await throwResponseError(response);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -102,75 +104,55 @@ function filenameFromContentDisposition(header: string | null): string | undefin
   return plainMatch?.[1]?.trim() || undefined;
 }
 
-export function readDevSession(): DevSession {
-  const storage = getStorage();
-  if (!storage) {
-    return emptySession;
-  }
-  const raw = storage.getItem(sessionKey);
-  if (!raw) {
-    return emptySession;
-  }
-  try {
-    const parsed = JSON.parse(raw) as DevSession;
-    return {
-      userId: typeof parsed.userId === "string" ? parsed.userId : "",
-      role: parsed.role === "staff" ? "staff" : "admin",
-    };
-  } catch {
-    return emptySession;
-  }
+export async function fetchAuthMe(): Promise<AuthPayload> {
+  return apiGet<AuthPayload>("/auth/me");
 }
 
-export function writeDevSession(session: DevSession): void {
-  getStorage()?.setItem(sessionKey, JSON.stringify(session));
-  notifyDevSessionChanged();
+export async function login(loginValue: string, password: string): Promise<AuthPayload> {
+  return apiPost<AuthPayload>("/auth/login", { login: loginValue, password });
 }
 
-export function apiDeleteSession(): void {
-  getStorage()?.removeItem(sessionKey);
-  notifyDevSessionChanged();
+export async function logout(): Promise<void> {
+  await apiPost<void>("/auth/logout", {});
 }
 
-function devHeaders(): Record<string, string> {
-  const session = readDevSession();
-  if (!session.userId) {
-    return {};
+function readError(response: Response): Promise<ApiError> {
+  return response
+    .json()
+    .then((data: { error?: { code?: string; message?: string } }) => {
+      return new ApiError(
+        data.error?.code ?? "REQUEST_FAILED",
+        data.error?.message ?? `请求失败：${response.status}`,
+        response.status,
+      );
+    })
+    .catch(() => new ApiError("REQUEST_FAILED", `请求失败：${response.status}`, response.status));
+}
+
+async function throwResponseError(response: Response): Promise<never> {
+  const error = await readError(response);
+  if (error.status === 401) {
+    notifySessionExpired();
+    redirectToLogin();
+  } else if (error.status === 403) {
+    notifyPermissionsRefresh();
   }
-  return {
-    "X-Dev-User-ID": session.userId,
-    "X-Dev-Role": session.role,
-  };
+  throw error;
 }
 
-async function readError(response: Response): Promise<ApiError> {
-  try {
-    const data = (await response.json()) as { error?: { code?: string; message?: string } };
-    return new ApiError(
-      data.error?.code ?? "REQUEST_FAILED",
-      data.error?.message ?? `请求失败：${response.status}`,
-      response.status,
-    );
-  } catch {
-    return new ApiError("REQUEST_FAILED", `请求失败：${response.status}`, response.status);
-  }
-}
-
-function getStorage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-  return window.localStorage;
-}
-
-function notifyDevSessionChanged(): void {
+function notifySessionExpired(): void {
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event(devSessionEvent));
+    window.dispatchEvent(new Event(sessionExpiredEvent));
+  }
+}
+
+function notifyPermissionsRefresh(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(permissionsRefreshEvent));
   }
 }
 
 function redirectToLogin(): void {
-  apiDeleteSession();
   if (typeof window !== "undefined" && window.location.pathname !== "/login") {
     window.location.assign("/login");
   }

@@ -4,23 +4,29 @@ import { Alert, App, Button, Card, Col, Descriptions, Flex, Form, Input, Row, Ta
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import type { AppSettings } from "@/features/types";
+import { useSession } from "@/components/layout/session-context";
 import { changePassword, type ChangePasswordInput } from "@/features/users/password";
-import { apiGet, apiPost, readDevSession, type Role } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 
 type SettingsValues = { backup_email_recipient: string };
 
 export default function SettingsPage() {
   const { message } = App.useApp();
+  const { user, hasPermission } = useSession();
+  const canReadSettings = hasPermission("setting.read");
+  const canUpdateSettings = hasPermission("setting.update");
   const [passwordForm] = Form.useForm<ChangePasswordInput>();
   const [settingsForm] = Form.useForm<SettingsValues>();
-  const [userId, setUserId] = useState("");
-  const [role, setRole] = useState<Role>("admin");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
   const loadSettings = useCallback(async () => {
+    if (!canReadSettings) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -31,12 +37,9 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [settingsForm]);
+  }, [canReadSettings, settingsForm]);
 
   useEffect(() => {
-    const session = readDevSession();
-    setUserId(session.userId);
-    setRole(session.role);
     void loadSettings();
   }, [loadSettings]);
 
@@ -46,7 +49,8 @@ export default function SettingsPage() {
     try {
       await changePassword(values);
       passwordForm.resetFields();
-      message.success("密码已更新");
+      message.success("密码已更新，请使用新密码重新登录");
+      window.location.assign("/login");
     } catch (err) {
       setError(err instanceof Error ? err.message : "修改密码失败");
     } finally {
@@ -87,8 +91,9 @@ export default function SettingsPage() {
             <Descriptions
               column={1}
               items={[
-                { key: "id", label: "用户 ID", children: <span className="mono">{userId || "-"}</span> },
-                { key: "role", label: "角色", children: <Tag color={role === "admin" ? "purple" : "blue"}>{role}</Tag> },
+                { key: "name", label: "用户名", children: user?.name || "-" },
+                { key: "email", label: "邮箱", children: user?.email || "-" },
+                { key: "role", label: "角色", children: <Tag color={user?.role === "admin" ? "purple" : "blue"}>{user?.role}</Tag> },
               ]}
             />
           </Card>
@@ -117,16 +122,18 @@ export default function SettingsPage() {
             </Form>
           </Card>
         </Col>
-        <Col xl={12} xs={24}>
-          <Card loading={loading} title="备份设置">
-            <Form<SettingsValues> form={settingsForm} layout="vertical" requiredMark={false} onFinish={saveSettings}>
-              <Form.Item label="备份邮件收件人" name="backup_email_recipient" rules={[{ required: true, type: "email", message: "请输入有效邮箱" }]}>
-                <Input />
-              </Form.Item>
-              <Button htmlType="submit" loading={settingsSaving} type="primary">保存设置</Button>
-            </Form>
-          </Card>
-        </Col>
+        {canReadSettings ? (
+          <Col xl={12} xs={24}>
+            <Card loading={loading} title="备份设置">
+              <Form<SettingsValues> form={settingsForm} layout="vertical" requiredMark={false} onFinish={saveSettings}>
+                <Form.Item label="备份邮件收件人" name="backup_email_recipient" rules={[{ required: true, type: "email", message: "请输入有效邮箱" }]}>
+                  <Input disabled={!canUpdateSettings} />
+                </Form.Item>
+                {canUpdateSettings ? <Button htmlType="submit" loading={settingsSaving} type="primary">保存设置</Button> : null}
+              </Form>
+            </Card>
+          </Col>
+        ) : null}
       </Row>
     </Flex>
   );

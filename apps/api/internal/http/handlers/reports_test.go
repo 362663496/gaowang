@@ -8,14 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"gaowang/apps/api/internal/config"
 	apihttp "gaowang/apps/api/internal/http"
 	"gaowang/apps/api/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func Test_ReportEndpoints_return_empty_rows_without_sales(t *testing.T) {
@@ -23,10 +20,11 @@ func Test_ReportEndpoints_return_empty_rows_without_sales(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newReportTestDB(t)
 	user := createReportUser(t, db)
-	router := apihttp.NewRouter(config.Config{}, db)
+	token := createSessionToken(t, db, user.ID)
+	router := apihttp.NewRouter(testConfig(), db)
 
 	// When
-	response := getReport(t, router, user.ID, "/api/v1/reports/product-ranking")
+	response := getReport(t, router, token, "/api/v1/reports/product-ranking")
 
 	// Then
 	if response.Code != http.StatusOK {
@@ -71,13 +69,14 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	if err := db.Model(&product).Updates(map[string]any{"archived_at": archivedAt, "enabled": false}).Error; err != nil {
 		t.Fatalf("archive product: %v", err)
 	}
-	router := apihttp.NewRouter(config.Config{}, db)
+	token := createSessionToken(t, db, user.ID)
+	router := apihttp.NewRouter(testConfig(), db)
 
 	// When
-	summaryResponse := getReport(t, router, user.ID, "/api/v1/reports/sales-summary")
-	trendResponse := getReport(t, router, user.ID, "/api/v1/reports/sales-trend")
-	productResponse := getReport(t, router, user.ID, "/api/v1/reports/product-ranking")
-	shopResponse := getReport(t, router, user.ID, "/api/v1/reports/shop-ranking")
+	summaryResponse := getReport(t, router, token, "/api/v1/reports/sales-summary")
+	trendResponse := getReport(t, router, token, "/api/v1/reports/sales-trend")
+	productResponse := getReport(t, router, token, "/api/v1/reports/product-ranking")
+	shopResponse := getReport(t, router, token, "/api/v1/reports/shop-ranking")
 
 	// Then
 	assertSalesSummaryResponse(t, summaryResponse, 500, 200, 300)
@@ -188,14 +187,7 @@ func assertShopRankingResponse(t *testing.T, response *httptest.ResponseRecorder
 
 func newReportTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&models.User{}, &models.Shop{}, &models.Product{}, &models.StockMovement{}); err != nil {
-		t.Fatalf("migrate sqlite: %v", err)
-	}
-	return db
+	return openHandlerTestDB(t, &models.User{}, &models.Session{}, &models.StaffPermission{}, &models.Shop{}, &models.Product{}, &models.StockMovement{}, &models.AuditLog{})
 }
 
 func createReportUser(t *testing.T, db *gorm.DB) models.User {
@@ -207,11 +199,10 @@ func createReportUser(t *testing.T, db *gorm.DB) models.User {
 	return user
 }
 
-func getReport(t *testing.T, router http.Handler, userID uuid.UUID, path string) *httptest.ResponseRecorder {
+func getReport(t *testing.T, router http.Handler, token string, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	request.Header.Set("X-Dev-User-ID", userID.String())
-	request.Header.Set("X-Dev-Role", string(models.RoleAdmin))
+	withAuth(request, token)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response

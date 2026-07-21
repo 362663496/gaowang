@@ -1,14 +1,21 @@
 "use client";
 
-import { Card, Col, Flex, List, Progress, Row, Statistic, Table, Tag, type TableProps } from "antd";
+import { Card, Col, Flex, List, Progress, Result, Row, Statistic, Table, Tag, type TableProps } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageEmpty, PageError, PageLoading } from "@/components/layout/page-feedback";
 import { PageHeader } from "@/components/layout/page-header";
+import { useSession } from "@/components/layout/session-context";
 import type { InventorySnapshot, ProductRankingRow, SalesSummary, SalesTrendRow, ShopRankingRow } from "@/features/types";
 import { apiGet } from "@/lib/api";
 import { formatMoney, formatQuantity } from "@/lib/format";
 
 export default function ReportsPage() {
+  const { hasPermission } = useSession();
+  const canSummary = hasPermission("report.sales_summary");
+  const canTrend = hasPermission("report.sales_trend");
+  const canProductRank = hasPermission("report.product_ranking");
+  const canShopRank = hasPermission("report.shop_ranking");
+  const canInventory = hasPermission("inventory.read");
   const [summary, setSummary] = useState<SalesSummary | null>(null);
   const [trend, setTrend] = useState<SalesTrendRow[]>([]);
   const [products, setProducts] = useState<ProductRankingRow[]>([]);
@@ -22,11 +29,11 @@ export default function ReportsPage() {
     setError("");
     try {
       const [report, salesTrend, productRanking, shopRanking, stock] = await Promise.all([
-        apiGet<{ summary: SalesSummary }>("/reports/sales-summary"),
-        apiGet<{ items: SalesTrendRow[] }>("/reports/sales-trend"),
-        apiGet<{ items: ProductRankingRow[] }>("/reports/product-ranking"),
-        apiGet<{ items: ShopRankingRow[] }>("/reports/shop-ranking"),
-        apiGet<{ items: InventorySnapshot[] }>("/inventory?all=true"),
+        canSummary ? apiGet<{ summary: SalesSummary }>("/reports/sales-summary") : Promise.resolve({ summary: null as SalesSummary | null }),
+        canTrend ? apiGet<{ items: SalesTrendRow[] }>("/reports/sales-trend") : Promise.resolve({ items: [] as SalesTrendRow[] }),
+        canProductRank ? apiGet<{ items: ProductRankingRow[] }>("/reports/product-ranking") : Promise.resolve({ items: [] as ProductRankingRow[] }),
+        canShopRank ? apiGet<{ items: ShopRankingRow[] }>("/reports/shop-ranking") : Promise.resolve({ items: [] as ShopRankingRow[] }),
+        canInventory ? apiGet<{ items: InventorySnapshot[] }>("/inventory?all=true") : Promise.resolve({ items: [] as InventorySnapshot[] }),
       ]);
       setSummary(report.summary);
       setTrend(salesTrend.items);
@@ -38,7 +45,7 @@ export default function ReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canInventory, canProductRank, canShopRank, canSummary, canTrend]);
 
   useEffect(() => {
     void load();
@@ -52,7 +59,9 @@ export default function ReportsPage() {
 
   if (loading) return <PageLoading label="加载报表" />;
   if (error) return <PageError message={error} onRetry={() => void load()} />;
-  if (!summary) return <PageEmpty title="暂无报表" />;
+  if (!canSummary && !canTrend && !canProductRank && !canShopRank && !canInventory) {
+    return <Result status="403" subTitle="当前账号没有可查看的报表权限。" title="无权限" />;
+  }
 
   const lowStockColumns: TableProps<InventorySnapshot>["columns"] = [
     { title: "商品", dataIndex: ["Product", "Name"], render: (value: string) => <strong>{value}</strong> },
@@ -64,129 +73,125 @@ export default function ReportsPage() {
   return (
     <Flex gap={20} vertical>
       <PageHeader description="销售额、成本、毛利、库存金额和低库存概览。" title="报表" />
-      <Row gutter={[12, 12]}>
-        <Col lg={5} sm={12} xs={24}><Metric label="销售额" value={formatMoney(summary.revenue_cents)} /></Col>
-        <Col lg={5} sm={12} xs={24}><Metric label="销售成本" value={formatMoney(summary.cost_cents)} /></Col>
-        <Col lg={5} sm={12} xs={24}><Metric label="毛利" value={formatMoney(summary.gross_profit_cents)} /></Col>
-        <Col lg={5} sm={12} xs={24}><Metric label="库存金额" value={formatMoney(inventoryValue)} /></Col>
-        <Col lg={4} sm={12} xs={24}><Metric label="低库存品类" value={formatQuantity(lowStock.length)} /></Col>
-      </Row>
+      {canSummary && summary ? (
+        <Row gutter={[12, 12]}>
+          <Col lg={5} sm={12} xs={24}><Metric label="销售额" value={formatMoney(summary.revenue_cents)} /></Col>
+          <Col lg={5} sm={12} xs={24}><Metric label="销售成本" value={formatMoney(summary.cost_cents)} /></Col>
+          <Col lg={5} sm={12} xs={24}><Metric label="毛利" value={formatMoney(summary.gross_profit_cents)} /></Col>
+          {canInventory ? <Col lg={5} sm={12} xs={24}><Metric label="库存金额" value={formatMoney(inventoryValue)} /></Col> : null}
+          {canInventory ? <Col lg={4} sm={12} xs={24}><Metric label="低库存品类" value={formatQuantity(lowStock.length)} /></Col> : null}
+        </Row>
+      ) : null}
       <Row gutter={[16, 16]}>
-        <Col xl={14} xs={24}><TrendPanel rows={trend} /></Col>
-        <Col xl={10} xs={24}>
-          <RankingPanel
-            rows={products.map((item) => ({
-              id: item.product_id,
-              label: item.product_name,
-              sublabel: item.product_code,
-              archived: item.archived,
-              revenue: item.revenue_cents,
-              quantity: item.quantity_sold,
-              gross: item.gross_profit_cents,
-            }))}
-            title="商品销售排行"
-          />
-        </Col>
+        {canTrend ? (
+          <Col xl={14} xs={24}><TrendPanel rows={trend} /></Col>
+        ) : null}
+        {canProductRank ? (
+          <Col xl={canTrend ? 10 : 24} xs={24}>
+            <RankingPanel
+              rows={products.map((item) => ({
+                id: item.product_id,
+                label: item.product_name,
+                sublabel: item.product_code,
+                archived: item.archived,
+                revenue: item.revenue_cents,
+                quantity: item.quantity_sold,
+                gross: item.gross_profit_cents,
+              }))}
+              title="商品销售排行"
+            />
+          </Col>
+        ) : null}
       </Row>
-      <RankingPanel
-        rows={shops.map((item) => ({
-          id: item.shop_id,
-          label: item.shop_name,
-          revenue: item.revenue_cents,
-          quantity: item.quantity_sold,
-          gross: item.gross_profit_cents,
-        }))}
-        title="店铺销售排行"
-      />
-      <Card className="table-card" title="低库存列表">
-        <Table<InventorySnapshot>
-          columns={lowStockColumns}
-          dataSource={lowStock}
-          pagination={false}
-          rowKey="ProductID"
-          scroll={{ x: 620 }}
-          size="small"
+      {canShopRank ? (
+        <RankingPanel
+          rows={shops.map((item) => ({
+            id: item.shop_id,
+            label: item.shop_name,
+            revenue: item.revenue_cents,
+            quantity: item.quantity_sold,
+            gross: item.gross_profit_cents,
+          }))}
+          title="店铺销售排行"
         />
-      </Card>
+      ) : null}
+      {canInventory ? (
+        <Card className="table-card" title="低库存商品">
+          <Table<InventorySnapshot>
+            columns={lowStockColumns}
+            dataSource={lowStock}
+            locale={{ emptyText: <PageEmpty title="暂无低库存" /> }}
+            pagination={false}
+            rowKey="ProductID"
+            scroll={{ x: 700 }}
+          />
+        </Card>
+      ) : null}
     </Flex>
   );
 }
 
-function TrendPanel({ rows }: { rows: SalesTrendRow[] }) {
-  const maxRevenue = Math.max(...rows.map((row) => row.revenue_cents), 0);
+function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <Card title="近 30 天销售趋势">
-      <List<SalesTrendRow>
-        dataSource={rows}
-        locale={{ emptyText: "暂无销售趋势" }}
-        renderItem={(row) => (
-          <List.Item>
-            <Flex gap={7} style={{ width: "100%" }} vertical>
-              <Flex justify="space-between">
-                <span className="mono muted">{row.day}</span>
-                <strong>{formatMoney(row.revenue_cents)}</strong>
-              </Flex>
-              <Progress percent={percent(row.revenue_cents, maxRevenue)} showInfo={false} size="small" />
-              <Flex className="muted" justify="space-between">
-                <span>销量 {formatQuantity(row.quantity_sold)}</span>
-                <span>毛利 {formatMoney(row.gross_profit_cents)}</span>
-              </Flex>
-            </Flex>
-          </List.Item>
-        )}
-      />
+    <Card className="metric-card">
+      <Statistic title={label} value={value} />
     </Card>
   );
 }
 
-type RankingItem = {
-  id: string;
-  label: string;
-  sublabel?: string;
-  archived?: boolean;
-  revenue: number;
-  quantity: number;
-  gross: number;
-};
+function TrendPanel({ rows }: { rows: SalesTrendRow[] }) {
+  const max = Math.max(...rows.map((row) => row.revenue_cents), 1);
+  return (
+    <Card title="销售趋势">
+      {rows.length === 0 ? (
+        <PageEmpty title="暂无趋势数据" />
+      ) : (
+        <List
+          dataSource={rows}
+          renderItem={(row) => (
+            <List.Item>
+              <List.Item.Meta description={formatMoney(row.revenue_cents)} title={row.day} />
+              <Progress percent={Math.round((row.revenue_cents / max) * 100)} showInfo={false} style={{ width: 160 }} />
+            </List.Item>
+          )}
+        />
+      )}
+    </Card>
+  );
+}
 
-function RankingPanel({ title, rows }: { title: string; rows: RankingItem[] }) {
-  const maxRevenue = Math.max(...rows.map((row) => row.revenue), 0);
+function RankingPanel({
+  rows,
+  title,
+}: {
+  title: string;
+  rows: Array<{ id: string; label: string; sublabel?: string; archived?: boolean; revenue: number; quantity: number; gross: number }>;
+}) {
   return (
     <Card title={title}>
-      <List<RankingItem>
-        dataSource={rows}
-        locale={{ emptyText: "暂无销售排行" }}
-        renderItem={(row, index) => (
-          <List.Item>
-            <Flex gap={7} style={{ width: "100%" }} vertical>
-              <Flex align="flex-start" gap={12} justify="space-between">
-                <div>
-                  <Flex align="center" gap={6}>
-                    <strong>{index + 1}. {row.label}</strong>
+      {rows.length === 0 ? (
+        <PageEmpty title="暂无排行" />
+      ) : (
+        <List
+          dataSource={rows}
+          renderItem={(row, index) => (
+            <List.Item>
+              <List.Item.Meta
+                avatar={<Tag color="blue">#{index + 1}</Tag>}
+                description={
+                  <span>
+                    {row.sublabel ? <span className="mono">{row.sublabel} </span> : null}
                     {row.archived ? <Tag>已归档</Tag> : null}
-                  </Flex>
-                  {row.sublabel ? <span className="mono muted">{row.sublabel}</span> : null}
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <strong>{formatMoney(row.revenue)}</strong>
-                  <div className="muted">销量 {formatQuantity(row.quantity)}</div>
-                </div>
-              </Flex>
-              <Progress percent={percent(row.revenue, maxRevenue)} showInfo={false} size="small" />
-              <span className="muted">毛利 {formatMoney(row.gross)}</span>
-            </Flex>
-          </List.Item>
-        )}
-      />
+                    销量 {formatQuantity(row.quantity)} · 毛利 {formatMoney(row.gross)}
+                  </span>
+                }
+                title={row.label}
+              />
+              <strong>{formatMoney(row.revenue)}</strong>
+            </List.Item>
+          )}
+        />
+      )}
     </Card>
   );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return <Card className="metric-card"><Statistic title={label} value={value} /></Card>;
-}
-
-function percent(value: number, max: number): number {
-  if (max <= 0) return 0;
-  return Math.max(4, Math.round((value / max) * 100));
 }

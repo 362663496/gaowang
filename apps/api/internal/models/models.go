@@ -47,6 +47,21 @@ func (u *User) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// Session stores only the HMAC hash of a browser cookie token.
+type Session struct {
+	TokenHash string    `gorm:"primaryKey;size:64"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
+	User      User      `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	ExpiresAt time.Time `gorm:"not null;index"`
+	CreatedAt time.Time
+}
+
+// StaffPermission is one shared staff role grant; unknown keys are ignored at load time.
+type StaffPermission struct {
+	Permission string `gorm:"primaryKey;size:64"`
+	CreatedAt  time.Time
+}
+
 type Shop struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	Name      string    `gorm:"uniqueIndex;not null"`

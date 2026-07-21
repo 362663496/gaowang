@@ -14,7 +14,7 @@ npx tsc --noEmit --incremental false
 ## Type Ownership
 
 - Shared API/domain types live in `src/features/types.ts`.
-- Transport/session primitives (`Role`, `DevSession`, and `ApiError`) live with `src/lib/api.ts`.
+- Transport/session primitives (`Role`, `SessionUser`, `AuthPayload`, and `ApiError`) live with `src/lib/api.ts`.
 - Component-only prop and aggregate row types stay next to the component/handler that owns them.
 - Model finite states as unions: `Role`, `MovementType`, and backup status are current examples.
 
@@ -29,7 +29,7 @@ npx tsc --noEmit --incremental false
 
 No schema-validation library is installed. Runtime checks are narrow and local:
 
-- `readDevSession` catches invalid JSON and narrows `userId`/`role` before use.
+- `AuthPayload` models the explicit lowercase `/auth/login` and `/auth/me` user DTO plus its permission-key array; components do not cast the response locally.
 - `readError` accepts missing error fields and supplies stable fallbacks.
 - Forms use typed Ant Design `Form` values and rules plus explicit string/number conversion; the Go API performs authoritative validation.
 - `ApiError` carries `code`, `message`, and HTTP `status`; UI code normally displays `Error.message`.

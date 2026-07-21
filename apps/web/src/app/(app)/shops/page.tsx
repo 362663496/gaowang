@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { initialPagination, tablePagination } from "@/features/pagination";
 import type { Paginated, Shop } from "@/features/types";
+import { useSession } from "@/components/layout/session-context";
 import { apiGet, apiPost } from "@/lib/api";
 import { formatDateTime, formatQuantity } from "@/lib/format";
 
@@ -13,6 +14,8 @@ type ShopValues = { name: string; note?: string };
 
 export default function ShopsPage() {
   const { message } = App.useApp();
+  const { hasPermission } = useSession();
+  const canCreate = hasPermission("shop.create");
   const [shops, setShops] = useState<Shop[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -49,7 +52,7 @@ export default function ShopsPage() {
   return (
     <Flex gap={20} vertical>
       <PageHeader
-        actions={<Button icon={<PlusOutlined />} type="primary" onClick={() => setOpen(true)}>新增店铺</Button>}
+        actions={canCreate ? <Button icon={<PlusOutlined />} type="primary" onClick={() => setOpen(true)}>新增店铺</Button> : null}
         description="店铺用于销售出库归属，不单独持有库存。"
         title="店铺"
       />

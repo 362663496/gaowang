@@ -47,6 +47,7 @@ const auditActions: Record<string, string> = {
   "backup.run_succeeded": "备份成功",
   "backup.run_failed": "备份失败",
   "settings.update": "设置修改",
+  "permission.updated": "权限更新",
 };
 
 const auditResources: Record<string, string> = {

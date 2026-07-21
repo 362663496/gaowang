@@ -21,6 +21,8 @@ func Open(databaseURL string) (*gorm.DB, error) {
 func Migrate(database *gorm.DB) error {
 	if err := database.AutoMigrate(
 		&models.User{},
+		&models.Session{},
+		&models.StaffPermission{},
 		&models.Shop{},
 		&models.Product{},
 		&models.InventorySnapshot{},

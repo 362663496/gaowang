@@ -17,9 +17,7 @@ import (
 	"gaowang/apps/api/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
@@ -29,6 +27,7 @@ func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	token := createSessionToken(t, db, user.ID)
 	uploadDir := t.TempDir()
 	oldImage := "old.png"
 	if err := os.WriteFile(filepath.Join(uploadDir, oldImage), []byte("old"), 0o644); err != nil {
@@ -38,13 +37,13 @@ func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatalf("create product: %v", err)
 	}
-	router := apihttp.NewRouter(config.Config{UploadDir: uploadDir}, db)
+	router := apihttp.NewRouter(config.Config{AuthSecret: testAuthSecret, UploadDir: uploadDir}, db)
 	fields := map[string]string{
 		"name": "Green Tea", "code": "GREEN-TEA", "note": "updated",
 		"default_purchase_cents": "120", "default_sale_cents": "250", "low_stock_threshold": "4",
 	}
 
-	response := productMultipartRequest(t, router, user.ID, http.MethodPatch, "/api/v1/products/"+product.ID.String(), fields, "", nil)
+	response := productMultipartRequest(t, router, token, http.MethodPatch, "/api/v1/products/"+product.ID.String(), fields, "", nil)
 	if response.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want 200; body = %s", response.Code, response.Body.String())
 	}
@@ -59,7 +58,7 @@ func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
 		t.Fatalf("preserved image missing: %v", err)
 	}
 
-	response = productMultipartRequest(t, router, user.ID, http.MethodPatch, "/api/v1/products/"+product.ID.String(), fields, "new.jpg", []byte("new"))
+	response = productMultipartRequest(t, router, token, http.MethodPatch, "/api/v1/products/"+product.ID.String(), fields, "new.jpg", []byte("new"))
 	if response.Code != http.StatusOK {
 		t.Fatalf("replace image status = %d, want 200; body = %s", response.Code, response.Body.String())
 	}
@@ -88,7 +87,7 @@ func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
 		"name": "Bad Update", "code": conflict.Code, "note": "must not persist",
 		"default_purchase_cents": "999", "default_sale_cents": "999", "low_stock_threshold": "9",
 	}
-	response = productMultipartRequest(t, router, user.ID, http.MethodPatch, "/api/v1/products/"+product.ID.String(), badFields, "leak.png", []byte("leak"))
+	response = productMultipartRequest(t, router, token, http.MethodPatch, "/api/v1/products/"+product.ID.String(), badFields, "leak.png", []byte("leak"))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "商品编码已存在或数据无效") {
 		t.Fatalf("failed update status/body = %d %s, want stable 400 message", response.Code, response.Body.String())
 	}
@@ -121,6 +120,7 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	token := createSessionToken(t, db, user.ID)
 	uploadDir := t.TempDir()
 	imageName := "tea.png"
 	if err := os.WriteFile(filepath.Join(uploadDir, imageName), []byte("image"), 0o644); err != nil {
@@ -130,9 +130,9 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatalf("create product: %v", err)
 	}
-	router := apihttp.NewRouter(config.Config{UploadDir: uploadDir}, db)
+	router := apihttp.NewRouter(config.Config{AuthSecret: testAuthSecret, UploadDir: uploadDir}, db)
 
-	response := productRequest(router, user.ID, http.MethodPatch, "/api/v1/products/"+product.ID.String()+"/enabled", `{"enabled":false}`)
+	response := productRequest(router, token, http.MethodPatch, "/api/v1/products/"+product.ID.String()+"/enabled", `{"enabled":false}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("disable status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
 	}
@@ -144,7 +144,7 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 		t.Fatal("product remained enabled after explicit false update")
 	}
 	assertProductAudit(t, db, "product.disable", product.ID.String())
-	response = productRequest(router, user.ID, http.MethodPatch, "/api/v1/products/"+product.ID.String()+"/enabled", `{"enabled":true}`)
+	response = productRequest(router, token, http.MethodPatch, "/api/v1/products/"+product.ID.String()+"/enabled", `{"enabled":true}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("enable status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
 	}
@@ -156,7 +156,7 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 	}
 	assertProductAudit(t, db, "product.enable", product.ID.String())
 
-	response = productRequest(router, user.ID, http.MethodDelete, "/api/v1/products/"+product.ID.String(), "")
+	response = productRequest(router, token, http.MethodDelete, "/api/v1/products/"+product.ID.String(), "")
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want %d; body = %s", response.Code, http.StatusNoContent, response.Body.String())
 	}
@@ -179,7 +179,7 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 	if err := db.Create(&models.InventorySnapshot{ProductID: referenced.ID}).Error; err != nil {
 		t.Fatalf("create inventory snapshot: %v", err)
 	}
-	response = productRequest(router, user.ID, http.MethodDelete, "/api/v1/products/"+referenced.ID.String(), "")
+	response = productRequest(router, token, http.MethodDelete, "/api/v1/products/"+referenced.ID.String(), "")
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("referenced delete = %d/%s, want 204", response.Code, response.Body.String())
 	}
@@ -194,10 +194,10 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 		t.Fatalf("archived product image was removed: %v", err)
 	}
 	assertProductAudit(t, db, "product.archive", referenced.ID.String())
-	assertProductListContains(t, router, user.ID, "/api/v1/products", referenced.ID, false)
-	assertProductListContains(t, router, user.ID, "/api/v1/products?include_archived=true", referenced.ID, true)
+	assertProductListContains(t, router, token, "/api/v1/products", referenced.ID, false)
+	assertProductListContains(t, router, token, "/api/v1/products?include_archived=true", referenced.ID, true)
 
-	inventoryResponse := productRequest(router, user.ID, http.MethodGet, "/api/v1/inventory", "")
+	inventoryResponse := productRequest(router, token, http.MethodGet, "/api/v1/inventory", "")
 	if inventoryResponse.Code != http.StatusOK || strings.Contains(inventoryResponse.Body.String(), referenced.ID.String()) {
 		t.Fatalf("inventory response = %d/%s, want archived product hidden", inventoryResponse.Code, inventoryResponse.Body.String())
 	}
@@ -209,7 +209,7 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 	if err := db.Create(&models.InventorySnapshot{ProductID: stocked.ID, Quantity: 2}).Error; err != nil {
 		t.Fatalf("create stocked snapshot: %v", err)
 	}
-	response = productRequest(router, user.ID, http.MethodDelete, "/api/v1/products/"+stocked.ID.String(), "")
+	response = productRequest(router, token, http.MethodDelete, "/api/v1/products/"+stocked.ID.String(), "")
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "PRODUCT_HAS_STOCK") {
 		t.Fatalf("stocked delete = %d/%s, want 409 PRODUCT_HAS_STOCK", response.Code, response.Body.String())
 	}
@@ -220,27 +220,19 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 
 func newProductTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&models.User{}, &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{}); err != nil {
-		t.Fatalf("migrate sqlite: %v", err)
-	}
-	return db
+	return openHandlerTestDB(t, &models.User{}, &models.Session{}, &models.StaffPermission{}, &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{})
 }
 
-func productRequest(router http.Handler, userID uuid.UUID, method string, path string, body string) *httptest.ResponseRecorder {
+func productRequest(router http.Handler, token string, method string, path string, body string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Dev-User-ID", userID.String())
-	request.Header.Set("X-Dev-Role", string(models.RoleAdmin))
+	withAuth(request, token)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response
 }
 
-func productMultipartRequest(t *testing.T, router http.Handler, userID uuid.UUID, method string, path string, fields map[string]string, filename string, image []byte) *httptest.ResponseRecorder {
+func productMultipartRequest(t *testing.T, router http.Handler, token string, method string, path string, fields map[string]string, filename string, image []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -263,8 +255,7 @@ func productMultipartRequest(t *testing.T, router http.Handler, userID uuid.UUID
 	}
 	request := httptest.NewRequest(method, path, &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
-	request.Header.Set("X-Dev-User-ID", userID.String())
-	request.Header.Set("X-Dev-Role", string(models.RoleAdmin))
+	withAuth(request, token)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response
@@ -281,9 +272,9 @@ func assertProductAudit(t *testing.T, db *gorm.DB, action string, productID stri
 	}
 }
 
-func assertProductListContains(t *testing.T, router http.Handler, userID uuid.UUID, path string, productID uuid.UUID, want bool) {
+func assertProductListContains(t *testing.T, router http.Handler, token string, path string, productID uuid.UUID, want bool) {
 	t.Helper()
-	response := productRequest(router, userID, http.MethodGet, path, "")
+	response := productRequest(router, token, http.MethodGet, path, "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("list products status = %d, want 200; body = %s", response.Code, response.Body.String())
 	}
