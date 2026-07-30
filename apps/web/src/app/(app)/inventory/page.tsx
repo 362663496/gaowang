@@ -169,7 +169,7 @@ export default function InventoryPage() {
               return (
                 <Card className="inventory-item-card" key={item.ProductID}>
                   <Flex gap={16} vertical>
-                    <ProductIdentity preview product={item.Product} size={64} />
+                    <ProductIdentity preview product={item.Product} size={128} />
                     <div className="inventory-card-values">
                       <div className="inventory-card-value">
                         <span className="inventory-card-label">数量</span>
