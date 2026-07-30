@@ -173,3 +173,36 @@ Completed database-backed cookie sessions, explicit route permissions, staff per
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: 库存卡片与统一商品价格发布
+
+**Date**: 2026-07-30
+**Task**: 库存卡片与统一商品价格发布
+**Branch**: `master`
+
+### Summary
+
+库存页改为响应式商品卡片，库存与流水/报表/导出统一按商品当前价格计算，流水增加北京时间范围筛选；完成全量验证并原子发布到 aliyun 20260730225253。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ca49234d0514ea99aaf1c4ef466796aeb8b1ff2d` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

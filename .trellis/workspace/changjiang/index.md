@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
-- **Last Active**: 2026-07-22
+- **Total Sessions**: 6
+- **Last Active**: 2026-07-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~175 | Active |
+| `journal-1.md` | ~208 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-07-30 | 库存卡片与统一商品价格发布 | `ca49234d0514ea99aaf1c4ef466796aeb8b1ff2d` | `master` |
 | 5 | 2026-07-22 | 流水修订与图片优先发布 | `81ed7ae`, `04af479` | `master` |
 | 4 | 2026-07-22 | API access control | `14d3146` | `master` |
 | 3 | 2026-07-17 | 完成商品库存工作流与 Ant Design 前端升级 | `a077db7`, `4b3a75d`, `ae21cec` | `master` |
