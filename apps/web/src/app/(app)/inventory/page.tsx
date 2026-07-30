@@ -169,7 +169,7 @@ export default function InventoryPage() {
               return (
                 <Card className="inventory-item-card" key={item.ProductID}>
                   <Flex gap={16} vertical>
-                    <ProductIdentity preview product={item.Product} size={128} />
+                    <ProductIdentity preview product={item.Product} size={160} />
                     <div className="inventory-card-values">
                       <div className="inventory-card-value">
                         <span className="inventory-card-label">数量</span>
@@ -178,12 +178,11 @@ export default function InventoryPage() {
                         </strong>
                       </div>
                       <div className="inventory-card-value">
-                        <span className="inventory-card-label">库存金额</span>
-                        <strong>{formatMoney(item.InventoryValueCents)}</strong>
+                        <span className="inventory-card-label">当前商品价格</span>
+                        <strong>{formatMoney(item.Product.DefaultPurchaseCents)}</strong>
                       </div>
                     </div>
-                    <Flex align="center" justify="space-between">
-                      <span className="inventory-card-label">状态</span>
+                    <Flex justify="flex-end">
                       <StockBadge quantity={item.Quantity} threshold={item.Product.LowStockThreshold} />
                     </Flex>
                   </Flex>

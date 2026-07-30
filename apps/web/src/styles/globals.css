@@ -177,7 +177,7 @@ textarea {
 
 .inventory-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
   gap: 12px;
 }
 
@@ -189,6 +189,17 @@ textarea {
 .inventory-item-card .ant-card-body {
   height: 100%;
   padding: 16px;
+}
+
+.inventory-item-card .product-cell-name {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.inventory-item-card :is(.ant-image, .ant-avatar) {
+  flex: 0 0 auto;
 }
 
 .inventory-card-values {
