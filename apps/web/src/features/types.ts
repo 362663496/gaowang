@@ -40,9 +40,7 @@ export type InventorySnapshot = {
   ProductID: string;
   Product: Product;
   Quantity: number;
-  MovingAverageCostCents: number;
   InventoryValueCents: number;
-  UpdatedAt: string;
 };
 
 export type MovementType = "inbound" | "sales_outbound" | "adjustment";
@@ -55,9 +53,6 @@ export type StockMovement = {
   ShopID: string | null;
   Shop: Shop | null;
   QuantityDelta: number;
-  PurchaseUnitCents: number | null;
-  SaleUnitCents: number | null;
-  CostUnitCents: number;
   PurchaseAmountCents: number;
   RevenueCents: number;
   CostAmountCents: number;
@@ -80,11 +75,8 @@ export type MovementRevisionValues = {
   operator_id: string;
   created_at: string;
   quantity_delta: number;
-  purchase_unit_cents: number | null;
-  sale_unit_cents: number | null;
   shop_id: string | null;
   note: string;
-  cost_unit_cents: number;
   purchase_amount_cents: number;
   revenue_cents: number;
   cost_amount_cents: number;
@@ -95,8 +87,6 @@ export type MovementImpact = {
   current_quantity: number;
   result_quantity: number;
   quantity_change: number;
-  current_moving_average_cost_cents: number;
-  result_moving_average_cost_cents: number;
   current_inventory_value_cents: number;
   result_inventory_value_cents: number;
   inventory_value_delta_cents: number;

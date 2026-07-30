@@ -27,9 +27,6 @@ type movementResponse struct {
 	ShopID              *uuid.UUID
 	Shop                *models.Shop
 	QuantityDelta       int64
-	PurchaseUnitCents   *int64
-	SaleUnitCents       *int64
-	CostUnitCents       int64
 	PurchaseAmountCents int64
 	RevenueCents        int64
 	CostAmountCents     int64
@@ -49,7 +46,6 @@ type movementUpdateRequest struct {
 	ExpectedRevision *int64  `json:"expected_revision"`
 	Quantity         *int64  `json:"quantity"`
 	QuantityDelta    *int64  `json:"quantity_delta"`
-	UnitCents        *int64  `json:"unit_cents"`
 	ShopID           *string `json:"shop_id"`
 	Note             string  `json:"note"`
 	ChangeReason     string  `json:"change_reason"`
@@ -66,6 +62,12 @@ func (h MovementHandler) List(c *gin.Context) {
 	}
 	if shopID := c.Query("shop_id"); shopID != "" {
 		query = query.Where("shop_id = ?", shopID)
+	}
+	if from, ok := movementQueryDate(c, "from"); ok {
+		query = query.Where("created_at >= ?", from)
+	}
+	if to, ok := movementQueryDate(c, "to"); ok {
+		query = query.Where("created_at < ?", to.AddDate(0, 0, 1))
 	}
 	query, meta, err := paginate(c, query)
 	if err != nil {
@@ -93,8 +95,13 @@ func (h MovementHandler) List(c *gin.Context) {
 			latestID = latest.ID
 			latestByProduct[movement.ProductID] = latestID
 		}
-		movement.IsLatest = movement.ID == latestID
-		items = append(items, newMovementResponse(movement))
+		priced, err := services.CurrentPriceMovement(movement)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to calculate movement amounts")
+			return
+		}
+		priced.IsLatest = movement.ID == latestID
+		items = append(items, newMovementResponse(priced))
 	}
 	writePage(c, items, meta)
 }
@@ -157,9 +164,21 @@ func movementUpdateInput(c *gin.Context) (services.MovementUpdateInput, bool) {
 	}
 	return services.MovementUpdateInput{
 		MovementID: movementID, ExpectedRevision: *req.ExpectedRevision,
-		Quantity: req.Quantity, QuantityDelta: req.QuantityDelta, UnitCents: req.UnitCents,
+		Quantity: req.Quantity, QuantityDelta: req.QuantityDelta,
 		ShopID: shopID, Note: req.Note, ChangeReason: req.ChangeReason,
 	}, true
+}
+
+func movementQueryDate(c *gin.Context, key string) (time.Time, bool) {
+	raw := c.Query(key)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	value, err := time.ParseInLocation("2006-01-02", raw, time.FixedZone("Asia/Shanghai", 8*60*60))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return value.UTC(), true
 }
 
 func writeMovementUpdateError(c *gin.Context, err error) {
@@ -184,9 +203,8 @@ func newMovementResponse(movement models.StockMovement) movementResponse {
 	item := movementResponse{
 		ID: movement.ID, Type: movement.Type, ProductID: movement.ProductID, Product: movement.Product,
 		ShopID: movement.ShopID, Shop: movement.Shop, QuantityDelta: movement.QuantityDelta,
-		PurchaseUnitCents: movement.PurchaseUnitCents, SaleUnitCents: movement.SaleUnitCents,
-		CostUnitCents: movement.CostUnitCents, PurchaseAmountCents: movement.PurchaseAmountCents,
-		RevenueCents: movement.RevenueCents, CostAmountCents: movement.CostAmountCents,
+		PurchaseAmountCents: movement.PurchaseAmountCents,
+		RevenueCents:        movement.RevenueCents, CostAmountCents: movement.CostAmountCents,
 		GrossProfitCents: movement.GrossProfitCents, Reason: movement.Reason,
 		OperatorID: movement.OperatorID,
 		Operator:   userResponse{ID: movement.Operator.ID, Name: movement.Operator.Name, Email: movement.Operator.Email, Role: movement.Operator.Role},

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,14 +24,12 @@ type inboundRequest struct {
 	ProductID string `json:"product_id" binding:"required"`
 	ShopID    string `json:"shop_id"`
 	Quantity  int64  `json:"quantity" binding:"required,gt=0"`
-	UnitCents *int64 `json:"unit_cents" binding:"required,gte=0"`
 }
 
 type outboundRequest struct {
-	ProductID     string `json:"product_id" binding:"required"`
-	ShopID        string `json:"shop_id" binding:"required"`
-	Quantity      int64  `json:"quantity" binding:"required,gt=0"`
-	SaleUnitCents *int64 `json:"sale_unit_cents" binding:"required,gte=0"`
+	ProductID string `json:"product_id" binding:"required"`
+	ShopID    string `json:"shop_id" binding:"required"`
+	Quantity  int64  `json:"quantity" binding:"required,gt=0"`
 }
 
 type adjustmentRequest struct {
@@ -41,8 +38,15 @@ type adjustmentRequest struct {
 	Reason        string `json:"reason" binding:"required,min=1,max=500"`
 }
 
+type inventoryResponse struct {
+	ProductID           uuid.UUID
+	Product             models.Product
+	Quantity            int64
+	InventoryValueCents int64
+}
+
 func (h InventoryHandler) ListCurrent(c *gin.Context) {
-	var items []models.InventorySnapshot
+	var snapshots []models.InventorySnapshot
 	base := h.activeInventoryQuery(c.Query("low_stock") == "true", c.Query("q"))
 	query, meta, err := paginate(c, base)
 	if err != nil {
@@ -51,10 +55,21 @@ func (h InventoryHandler) ListCurrent(c *gin.Context) {
 	}
 	if err := query.
 		Preload("Product").
-		Order("inventory_snapshots.updated_at desc").
-		Find(&items).Error; err != nil {
+		Find(&snapshots).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to list inventory")
 		return
+	}
+	items := make([]inventoryResponse, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		value, err := services.CurrentInventoryValue(snapshot)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to calculate inventory value")
+			return
+		}
+		items = append(items, inventoryResponse{
+			ProductID: snapshot.ProductID, Product: snapshot.Product,
+			Quantity: snapshot.Quantity, InventoryValueCents: value,
+		})
 	}
 	writePage(c, items, meta)
 }
@@ -63,7 +78,6 @@ func (h InventoryHandler) ExportCurrent(c *gin.Context) {
 	var items []models.InventorySnapshot
 	if err := h.activeInventoryQuery(c.Query("low_stock") == "true", c.Query("q")).
 		Preload("Product").
-		Order("inventory_snapshots.updated_at desc").
 		Find(&items).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to export inventory")
 		return
@@ -89,7 +103,10 @@ func (h InventoryHandler) activeInventoryQuery(lowStock bool, keyword string) *g
 		like := "%" + keyword + "%"
 		base = base.Where("products.name ILIKE ? OR products.code ILIKE ?", like, like)
 	}
-	return base
+	return base.
+		Order("products.name ASC").
+		Order("products.code ASC").
+		Order("inventory_snapshots.product_id ASC")
 }
 
 func (h InventoryHandler) CreateInbound(c *gin.Context) {
@@ -110,7 +127,7 @@ func (h InventoryHandler) CreateInbound(c *gin.Context) {
 		shopID = &parsedShopID
 	}
 	err := services.InventoryService{DB: h.DB}.CreateInbound(services.InboundInput{
-		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, UnitCents: *req.UnitCents, OperatorID: currentUserID(c),
+		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, OperatorID: currentUserID(c),
 	})
 	if writeStockResult(c, err) {
 		metadata := map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10)}
@@ -135,32 +152,11 @@ func (h InventoryHandler) CreateSalesOutbound(c *gin.Context) {
 		return
 	}
 	err := services.InventoryService{DB: h.DB}.CreateSalesOutbound(services.OutboundInput{
-		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, SaleUnitCents: *req.SaleUnitCents, OperatorID: currentUserID(c),
+		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, OperatorID: currentUserID(c),
 	})
 	if writeStockResult(c, err) {
 		recordAudit(c, h.DB, "inventory.sales_outbound", "product", productID.String(), map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10), "shop_id": shopID.String()})
 	}
-}
-
-func (r *outboundRequest) UnmarshalJSON(data []byte) error {
-	var payload struct {
-		ProductID          string `json:"product_id"`
-		ShopID             string `json:"shop_id"`
-		Quantity           int64  `json:"quantity"`
-		SaleUnitCents      *int64 `json:"sale_unit_cents"`
-		CamelSaleUnitCents *int64 `json:"saleUnitCents"`
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return err
-	}
-	r.ProductID = payload.ProductID
-	r.ShopID = payload.ShopID
-	r.Quantity = payload.Quantity
-	r.SaleUnitCents = payload.SaleUnitCents
-	if r.SaleUnitCents == nil {
-		r.SaleUnitCents = payload.CamelSaleUnitCents
-	}
-	return nil
 }
 
 func (h InventoryHandler) CreateAdjustment(c *gin.Context) {

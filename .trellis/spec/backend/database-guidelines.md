@@ -9,7 +9,7 @@
 
 ## Data Representation
 
-- Money is integer cents in `int64` fields (`DefaultSaleCents`, `RevenueCents`, and related fields). Never use floating point for stored or calculated money.
+- Money is integer cents in `int64` fields. `Product.DefaultPurchaseCents` and `Product.DefaultSaleCents` are the only runtime price sources; never use floating point for stored or calculated money.
 - Stock quantities are `int64`. Movement direction is represented by signed `QuantityDelta`.
 - Nullable database values use pointers, for example `ShopID`, `SaleUnitCents`, and `FinishedAt`.
 - Persisted enum values use typed strings; JSON metadata uses PostgreSQL `jsonb` via `datatypes.JSON`.
@@ -25,8 +25,8 @@
 - Normal stock operations append a `StockMovement`. Corrections may update only that product's latest movement through `InventoryService.UpdateMovement`; never update a movement directly from a handler and never delete one.
 - `StockMovement.ShopID` is optional metadata. Inbound may record it, but snapshots remain globally keyed only by `ProductID`; do not infer per-shop stock from movements.
 - Reject outbound or negative adjustments that would make stock negative with `ErrInsufficientStock`.
-- Keep `Quantity`, `MovingAverageCostCents`, and `InventoryValueCents` consistent. When an outbound empties stock, consume the remaining stored value to avoid rounding residue.
-- Latest-movement correction locks product → snapshot → movement, checks `revision`, reverses the saved latest effect, reapplies the shared transition, and writes snapshot, movement, editor fields, and `movement.updated` audit in one transaction.
+- Recalculate snapshot value as `Quantity × Product.DefaultPurchaseCents` on every stock mutation. The legacy moving-average and movement price/amount columns remain compatibility mirrors only; inventory, movement, export, dashboard, and report reads derive amounts from current product prices.
+- Latest-movement correction locks product → snapshot → movement, checks `revision`, reverses only the saved `QuantityDelta`, reapplies the shared transition with current product prices, and writes snapshot, movement, editor fields, and `movement.updated` audit in one transaction.
 
 References: `internal/services/inventory.go` and `internal/services/inventory_test.go`.
 

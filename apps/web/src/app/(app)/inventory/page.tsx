@@ -1,17 +1,18 @@
 "use client";
 
 import { DownloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Col, Flex, Input, Row, Statistic, Table, Tag, type TableProps } from "antd";
+import { Alert, App, Button, Card, Col, Flex, Input, Pagination, Row, Statistic } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
+import { PageEmpty, PageLoading } from "@/components/layout/page-feedback";
 import { useSession } from "@/components/layout/session-context";
 import { InventoryActions } from "@/features/inventory/action-forms";
-import { StockBadge } from "@/features/labels";
+import { StockBadge, stockStatus } from "@/features/labels";
 import { initialPagination, tablePagination } from "@/features/pagination";
 import { ProductIdentity } from "@/features/product-identity";
 import type { InventorySnapshot, Paginated, Product, Shop } from "@/features/types";
 import { apiDownload, apiGet } from "@/lib/api";
-import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
+import { formatMoney, formatQuantity } from "@/lib/format";
 
 export default function InventoryPage() {
   const { message } = App.useApp();
@@ -68,24 +69,6 @@ export default function InventoryPage() {
     () => inventory.filter((item) => item.Product.LowStockThreshold > 0 && item.Quantity <= item.Product.LowStockThreshold),
     [inventory],
   );
-
-  const columns: TableProps<InventorySnapshot>["columns"] = [
-    {
-      title: "商品",
-      dataIndex: "Product",
-      width: 280,
-      render: (_, item) => <ProductIdentity preview product={item.Product} />,
-    },
-    { title: "数量", dataIndex: "Quantity", width: 110, render: (value: number) => <Tag>{formatQuantity(value)}</Tag> },
-    { title: "移动平均成本", dataIndex: "MovingAverageCostCents", width: 150, render: formatMoney },
-    { title: "库存金额", dataIndex: "InventoryValueCents", width: 140, render: formatMoney },
-    {
-      title: "状态",
-      width: 100,
-      render: (_, item) => <StockBadge quantity={item.Quantity} threshold={item.Product.LowStockThreshold} />,
-    },
-    { title: "更新时间", dataIndex: "UpdatedAt", width: 180, render: (value: string) => <span className="muted">{formatDateTime(value)}</span> },
-  ];
 
   function done(value: string) {
     message.success(value);
@@ -176,16 +159,41 @@ export default function InventoryPage() {
       ) : null}
       {error ? <Alert action={<Button size="small" onClick={() => void load()}>重试</Button>} message={error} showIcon type="error" /> : null}
 
-      <Card className="table-card">
-        <Table<InventorySnapshot>
-          columns={columns}
-          dataSource={visibleInventory}
-          loading={loading}
-          pagination={tablePagination(pagination, setPage)}
-          rowKey="ProductID"
-          scroll={{ x: 960 }}
-        />
-      </Card>
+      {loading ? <PageLoading label="加载库存" /> : visibleInventory.length === 0 ? (
+        <PageEmpty title="没有符合条件的库存商品" />
+      ) : (
+        <Flex gap={16} vertical>
+          <div className="inventory-grid">
+            {visibleInventory.map((item) => {
+              const status = stockStatus(item.Quantity, item.Product.LowStockThreshold);
+              return (
+                <Card className="inventory-item-card" key={item.ProductID}>
+                  <Flex gap={16} vertical>
+                    <ProductIdentity preview product={item.Product} size={64} />
+                    <div className="inventory-card-values">
+                      <div className="inventory-card-value">
+                        <span className="inventory-card-label">数量</span>
+                        <strong className={`inventory-card-quantity inventory-card-quantity-${status.tone}`}>
+                          {formatQuantity(item.Quantity)}
+                        </strong>
+                      </div>
+                      <div className="inventory-card-value">
+                        <span className="inventory-card-label">库存金额</span>
+                        <strong>{formatMoney(item.InventoryValueCents)}</strong>
+                      </div>
+                    </div>
+                    <Flex align="center" justify="space-between">
+                      <span className="inventory-card-label">状态</span>
+                      <StockBadge quantity={item.Quantity} threshold={item.Product.LowStockThreshold} />
+                    </Flex>
+                  </Flex>
+                </Card>
+              );
+            })}
+          </div>
+          <Pagination className="inventory-pagination" {...tablePagination(pagination, setPage)} />
+        </Flex>
+      )}
     </Flex>
   );
 }

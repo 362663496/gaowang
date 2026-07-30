@@ -35,7 +35,7 @@ func BuildInventoryWorkbook(items []models.InventorySnapshot, uploadDir string) 
 		return nil, fmt.Errorf("rename sheet: %w", err)
 	}
 
-	headers := []string{"图片", "商品名称", "商品编码", "数量", "移动平均成本", "库存金额", "库存状态", "更新时间"}
+	headers := []string{"图片", "商品名称", "商品编码", "数量", "商品进货价", "库存金额", "库存状态", "更新时间"}
 	headerStyle, err := book.NewStyle(&excelize.Style{
 		Font:      &excelize.Font{Bold: true},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
@@ -86,13 +86,17 @@ func BuildInventoryWorkbook(items []models.InventorySnapshot, uploadDir string) 
 		code := item.Product.Code
 		threshold := item.Product.LowStockThreshold
 		imagePath := item.Product.ImagePath
+		inventoryValue, err := CurrentInventoryValue(item)
+		if err != nil {
+			return nil, fmt.Errorf("calculate inventory value for %s: %w", code, err)
+		}
 
 		values := map[string]any{
 			fmt.Sprintf("B%d", row): name,
 			fmt.Sprintf("C%d", row): code,
 			fmt.Sprintf("D%d", row): item.Quantity,
-			fmt.Sprintf("E%d", row): float64(item.MovingAverageCostCents) / 100,
-			fmt.Sprintf("F%d", row): float64(item.InventoryValueCents) / 100,
+			fmt.Sprintf("E%d", row): float64(item.Product.DefaultPurchaseCents) / 100,
+			fmt.Sprintf("F%d", row): float64(inventoryValue) / 100,
 			fmt.Sprintf("G%d", row): stockStatusLabel(item.Quantity, threshold),
 			fmt.Sprintf("H%d", row): formatExportTime(item.UpdatedAt),
 		}

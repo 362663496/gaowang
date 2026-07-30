@@ -175,6 +175,64 @@ textarea {
   margin-inline: 14px;
 }
 
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.inventory-item-card {
+  height: 100%;
+  border-color: var(--border-subtle);
+}
+
+.inventory-item-card .ant-card-body {
+  height: 100%;
+  padding: 16px;
+}
+
+.inventory-card-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.inventory-card-value {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inventory-card-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.inventory-card-value strong {
+  overflow: hidden;
+  font-size: 17px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-card-quantity-error {
+  color: var(--status-error);
+}
+
+.inventory-card-quantity-warning {
+  color: var(--status-warning);
+}
+
+.inventory-card-quantity-success {
+  color: var(--status-success);
+}
+
+.inventory-pagination {
+  align-self: flex-end;
+}
+
 .product-cell {
   min-width: 0;
 }
@@ -301,6 +359,10 @@ textarea {
 
   .page-header {
     align-items: flex-start !important;
+  }
+
+  .inventory-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

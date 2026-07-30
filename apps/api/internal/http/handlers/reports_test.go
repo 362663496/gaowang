@@ -50,7 +50,10 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newReportTestDB(t)
 	user := createReportUser(t, db)
-	product := models.Product{Name: "Tea", Code: "TEA", ImagePath: "/uploads/tea.png", Enabled: true}
+	product := models.Product{
+		Name: "Tea", Code: "TEA", ImagePath: "/uploads/tea.png",
+		DefaultPurchaseCents: 100, DefaultSaleCents: 250, Enabled: true,
+	}
 	shop := models.Shop{Name: "Main", Enabled: true}
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatalf("create product: %v", err)
@@ -59,10 +62,10 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 		t.Fatalf("create shop: %v", err)
 	}
 	service := services.InventoryService{DB: db}
-	if err := service.CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 5, UnitCents: 100, OperatorID: user.ID}); err != nil {
+	if err := service.CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 5, OperatorID: user.ID}); err != nil {
 		t.Fatalf("create inbound: %v", err)
 	}
-	if err := service.CreateSalesOutbound(services.OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, SaleUnitCents: 250, OperatorID: user.ID}); err != nil {
+	if err := service.CreateSalesOutbound(services.OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, OperatorID: user.ID}); err != nil {
 		t.Fatalf("create sale: %v", err)
 	}
 	createdAt := time.Now().UTC().Add(-time.Hour)
@@ -76,9 +79,9 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	if err := db.Model(&sale).Update("created_at", createdAt).Error; err != nil {
 		t.Fatalf("date sale: %v", err)
 	}
-	quantity, unit := int64(3), int64(300)
+	quantity := int64(3)
 	updated, _, err := service.UpdateMovement(services.MovementUpdateInput{
-		MovementID: sale.ID, ExpectedRevision: sale.Revision, Quantity: &quantity, UnitCents: &unit,
+		MovementID: sale.ID, ExpectedRevision: sale.Revision, Quantity: &quantity,
 		ShopID: &shop.ID, Note: "修正销售", ChangeReason: "数量修正", EditorID: user.ID,
 	})
 	if err != nil {
@@ -86,6 +89,9 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	}
 	if !updated.CreatedAt.Equal(createdAt) {
 		t.Fatalf("updated sale date = %s, want %s", updated.CreatedAt, createdAt)
+	}
+	if err := db.Model(&product).Updates(map[string]any{"default_purchase_cents": 120, "default_sale_cents": 300}).Error; err != nil {
+		t.Fatalf("change current product prices: %v", err)
 	}
 	archivedAt := time.Now().UTC()
 	if err := db.Model(&product).Updates(map[string]any{"archived_at": archivedAt, "enabled": false}).Error; err != nil {
@@ -101,8 +107,8 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	shopResponse := getReport(t, router, token, "/api/v1/reports/shop-ranking")
 
 	// Then
-	assertSalesSummaryResponse(t, summaryResponse, 900, 300, 600)
-	assertTrendResponse(t, trendResponse, createdAt.Format("2006-01-02"), 900, 600)
+	assertSalesSummaryResponse(t, summaryResponse, 900, 360, 540)
+	assertTrendResponse(t, trendResponse, createdAt.Format("2006-01-02"), 900, 540)
 	assertProductRankingResponse(t, productResponse, "Tea", "/uploads/tea.png", 900, 3, true)
 	assertShopRankingResponse(t, shopResponse, "Main", 900, 3)
 }

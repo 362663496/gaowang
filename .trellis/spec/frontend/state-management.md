@@ -5,7 +5,7 @@
 The app intentionally uses no global state library.
 
 - **Page/server data:** fetched into route-local `useState` and refreshed after successful mutations.
-- **Form/dialog state:** local to the page or feature form (`open`, selected IDs, editable prices, `saving`, and `error`).
+- **Form/dialog state:** local to the page or feature form (`open`, selected IDs, quantities, notes, `saving`, and `error`).
 - **Derived state:** computed from page data with direct expressions or `useMemo`; do not persist totals or filtered arrays separately.
 - **Filters:** local controlled inputs, serialized with `URLSearchParams` for API requests. Current pages do not mirror filters into the browser URL.
 - **Session state:** the one shared browser state, loaded from `/auth/me` into `SessionProvider`; the browser-readable state contains only the returned user and permission keys.

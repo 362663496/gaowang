@@ -10,14 +10,19 @@ export function MovementBadge({ type }: { type: MovementType }) {
   return <Tag color={map[type].tone}>{map[type].label}</Tag>;
 }
 
-export function StockBadge({ quantity, threshold }: { quantity: number; threshold: number }) {
+export function stockStatus(quantity: number, threshold: number) {
   if (quantity <= 0) {
-    return <Tag color="red">无库存</Tag>;
+    return { label: "无库存", tone: "error", tagColor: "red" } as const;
   }
   if (threshold > 0 && quantity <= threshold) {
-    return <Tag color="orange">低库存</Tag>;
+    return { label: "低库存", tone: "warning", tagColor: "gold" } as const;
   }
-  return <Tag color="green">正常</Tag>;
+  return { label: "正常", tone: "success", tagColor: "green" } as const;
+}
+
+export function StockBadge({ quantity, threshold }: { quantity: number; threshold: number }) {
+  const status = stockStatus(quantity, threshold);
+  return <Tag color={status.tagColor}>{status.label}</Tag>;
 }
 
 export function BackupStatusBadge({ status }: { status: BackupJob["Status"] }) {

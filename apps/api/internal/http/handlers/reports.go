@@ -12,6 +12,13 @@ type ReportHandler struct {
 	DB *gorm.DB
 }
 
+const (
+	salesQuantityExpr = "(-stock_movements.quantity_delta)"
+	salesRevenueExpr  = salesQuantityExpr + " * products.default_sale_cents"
+	salesCostExpr     = salesQuantityExpr + " * products.default_purchase_cents"
+	salesGrossExpr    = salesQuantityExpr + " * (products.default_sale_cents - products.default_purchase_cents)"
+)
+
 type salesSummary struct {
 	RevenueCents     int64 `json:"revenue_cents"`
 	CostCents        int64 `json:"cost_cents"`
@@ -52,8 +59,9 @@ type shopRankingRow struct {
 func (h ReportHandler) SalesSummary(c *gin.Context) {
 	var summary salesSummary
 	err := h.DB.Table("stock_movements").
-		Select("COALESCE(SUM(revenue_cents),0) AS revenue_cents, COALESCE(SUM(cost_amount_cents),0) AS cost_cents, COALESCE(SUM(gross_profit_cents),0) AS gross_profit_cents").
-		Where("type = ?", "sales_outbound").
+		Joins("JOIN products ON products.id = stock_movements.product_id").
+		Select("COALESCE(SUM("+salesRevenueExpr+"),0) AS revenue_cents, COALESCE(SUM("+salesCostExpr+"),0) AS cost_cents, COALESCE(SUM("+salesGrossExpr+"),0) AS gross_profit_cents").
+		Where("stock_movements.type = ?", "sales_outbound").
 		Scan(&summary).Error
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to load report")
@@ -66,7 +74,7 @@ func (h ReportHandler) SalesTrend(c *gin.Context) {
 	from, to := reportRange(c)
 	items := make([]salesTrendRow, 0)
 	err := salesReportBase(h.DB, from, to).
-		Select(reportDateExpr(h.DB) + " AS day, COALESCE(SUM(revenue_cents),0) AS revenue_cents, COALESCE(SUM(cost_amount_cents),0) AS cost_cents, COALESCE(SUM(gross_profit_cents),0) AS gross_profit_cents, COALESCE(SUM(-quantity_delta),0) AS quantity_sold").
+		Select(reportDateExpr(h.DB) + " AS day, COALESCE(SUM(" + salesRevenueExpr + "),0) AS revenue_cents, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents, COALESCE(SUM(" + salesGrossExpr + "),0) AS gross_profit_cents, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold").
 		Group("day").
 		Order("day asc").
 		Scan(&items).Error
@@ -81,8 +89,7 @@ func (h ReportHandler) ProductRanking(c *gin.Context) {
 	from, to := reportRange(c)
 	items := make([]productRankingRow, 0)
 	err := salesReportBase(h.DB, from, to).
-		Joins("JOIN products ON products.id = stock_movements.product_id").
-		Select("stock_movements.product_id AS product_id, products.name AS product_name, products.code AS product_code, products.image_path AS product_image_path, products.archived_at IS NOT NULL AS archived, COALESCE(SUM(stock_movements.revenue_cents),0) AS revenue_cents, COALESCE(SUM(stock_movements.cost_amount_cents),0) AS cost_cents, COALESCE(SUM(stock_movements.gross_profit_cents),0) AS gross_profit_cents, COALESCE(SUM(-stock_movements.quantity_delta),0) AS quantity_sold, COUNT(*) AS movement_count").
+		Select("stock_movements.product_id AS product_id, products.name AS product_name, products.code AS product_code, products.image_path AS product_image_path, products.archived_at IS NOT NULL AS archived, COALESCE(SUM(" + salesRevenueExpr + "),0) AS revenue_cents, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents, COALESCE(SUM(" + salesGrossExpr + "),0) AS gross_profit_cents, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold, COUNT(*) AS movement_count").
 		Group("stock_movements.product_id, products.name, products.code, products.image_path, products.archived_at").
 		Order("revenue_cents desc").
 		Limit(queryLimit(c, 10, 50)).
@@ -99,7 +106,7 @@ func (h ReportHandler) ShopRanking(c *gin.Context) {
 	items := make([]shopRankingRow, 0)
 	err := salesReportBase(h.DB, from, to).
 		Joins("JOIN shops ON shops.id = stock_movements.shop_id").
-		Select("stock_movements.shop_id AS shop_id, shops.name AS shop_name, COALESCE(SUM(stock_movements.revenue_cents),0) AS revenue_cents, COALESCE(SUM(stock_movements.cost_amount_cents),0) AS cost_cents, COALESCE(SUM(stock_movements.gross_profit_cents),0) AS gross_profit_cents, COALESCE(SUM(-stock_movements.quantity_delta),0) AS quantity_sold, COUNT(*) AS movement_count").
+		Select("stock_movements.shop_id AS shop_id, shops.name AS shop_name, COALESCE(SUM(" + salesRevenueExpr + "),0) AS revenue_cents, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents, COALESCE(SUM(" + salesGrossExpr + "),0) AS gross_profit_cents, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold, COUNT(*) AS movement_count").
 		Group("stock_movements.shop_id, shops.name").
 		Order("revenue_cents desc").
 		Limit(queryLimit(c, 10, 50)).
@@ -113,6 +120,7 @@ func (h ReportHandler) ShopRanking(c *gin.Context) {
 
 func salesReportBase(db *gorm.DB, from time.Time, to time.Time) *gorm.DB {
 	return db.Table("stock_movements").
+		Joins("JOIN products ON products.id = stock_movements.product_id").
 		Where("stock_movements.type = ?", "sales_outbound").
 		Where("stock_movements.created_at >= ? AND stock_movements.created_at < ?", from, to)
 }

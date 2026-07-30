@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { ProductCombobox } from "@/features/product-combobox";
 import type { InventorySnapshot, Product, Shop } from "@/features/types";
 import { apiPost } from "@/lib/api";
-import { centsToYuanInput, formatQuantity, yuanToCents } from "@/lib/format";
+import { formatQuantity } from "@/lib/format";
 
 type Props = {
   products: Product[];
@@ -18,8 +18,8 @@ type Props = {
   canAdjust?: boolean;
 };
 
-type InboundValues = { product_id: string; shop_id?: string; quantity: number; unit_yuan: number };
-type OutboundValues = { product_id: string; shop_id: string; quantity: number; sale_yuan: number };
+type InboundValues = { product_id: string; shop_id?: string; quantity: number };
+type OutboundValues = { product_id: string; shop_id: string; quantity: number };
 type AdjustmentValues = { product_id: string; quantity_delta: number; reason: string };
 
 export function InventoryActions({
@@ -55,7 +55,6 @@ function InboundForm({ products, shops, onDone }: Pick<Props, "products" | "shop
         product_id: values.product_id,
         shop_id: values.shop_id ?? "",
         quantity: values.quantity,
-        unit_cents: yuanToCents(String(values.unit_yuan ?? 0)),
       });
       setOpen(false);
       onDone("入库已记录");
@@ -79,16 +78,10 @@ function InboundForm({ products, shops, onDone }: Pick<Props, "products" | "shop
       >
         <Form<InboundValues>
           form={form}
-          initialValues={{ quantity: 1, unit_yuan: 0 }}
+          initialValues={{ quantity: 1 }}
           layout="vertical"
           requiredMark={false}
           onFinish={submit}
-          onValuesChange={(changed) => {
-            if ("product_id" in changed) {
-              const product = products.find((item) => item.ID === changed.product_id);
-              form.setFieldValue("unit_yuan", Number(centsToYuanInput(product?.DefaultPurchaseCents ?? 0)));
-            }
-          }}
         >
           {error ? <Alert message={error} showIcon style={{ marginBottom: 16 }} type="error" /> : null}
           <Form.Item label="商品" name="product_id" rules={[{ required: true, message: "请选择商品" }]}>
@@ -104,14 +97,9 @@ function InboundForm({ products, shops, onDone }: Pick<Props, "products" | "shop
               optionFilterProp="label"
             />
           </Form.Item>
-          <Flex gap={14} wrap>
-            <Form.Item label="数量" name="quantity" rules={[{ required: true, message: "请输入数量" }]} style={{ flex: 1, minWidth: 180 }}>
-              <InputNumber min={1} precision={0} style={{ width: "100%" }} />
-            </Form.Item>
-            <Form.Item label="进货单价（元）" name="unit_yuan" rules={[{ required: true, message: "请输入进货单价" }]} style={{ flex: 1, minWidth: 180 }}>
-              <InputNumber min={0} precision={2} style={{ width: "100%" }} />
-            </Form.Item>
-          </Flex>
+          <Form.Item label="数量" name="quantity" rules={[{ required: true, message: "请输入数量" }]}>
+            <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+          </Form.Item>
           <FormActions label="保存入库" saving={saving} onCancel={() => setOpen(false)} />
         </Form>
       </Modal>
@@ -138,7 +126,6 @@ function OutboundForm({ products, shops, inventory, onDone }: Props) {
         product_id: values.product_id,
         shop_id: values.shop_id,
         quantity: values.quantity,
-        sale_unit_cents: yuanToCents(String(values.sale_yuan ?? 0)),
       });
       setOpen(false);
       onDone("销售出库已记录");
@@ -162,16 +149,10 @@ function OutboundForm({ products, shops, inventory, onDone }: Props) {
       >
         <Form<OutboundValues>
           form={form}
-          initialValues={{ quantity: 1, sale_yuan: 0 }}
+          initialValues={{ quantity: 1 }}
           layout="vertical"
           requiredMark={false}
           onFinish={submit}
-          onValuesChange={(changed) => {
-            if ("product_id" in changed) {
-              const product = products.find((item) => item.ID === changed.product_id);
-              form.setFieldValue("sale_yuan", Number(centsToYuanInput(product?.DefaultSaleCents ?? 0)));
-            }
-          }}
         >
           {error ? <Alert message={error} showIcon style={{ marginBottom: 16 }} type="error" /> : null}
           <Form.Item label="商品" name="product_id" rules={[{ required: true, message: "请选择商品" }]}>
@@ -186,14 +167,9 @@ function OutboundForm({ products, shops, inventory, onDone }: Props) {
               optionFilterProp="label"
             />
           </Form.Item>
-          <Flex gap={14} wrap>
-            <Form.Item label={`数量（当前 ${formatQuantity(stock)}）`} name="quantity" rules={[{ required: true, message: "请输入数量" }]} style={{ flex: 1, minWidth: 180 }}>
-              <InputNumber min={1} precision={0} style={{ width: "100%" }} />
-            </Form.Item>
-            <Form.Item label="销售单价（元）" name="sale_yuan" rules={[{ required: true, message: "请输入销售单价" }]} style={{ flex: 1, minWidth: 180 }}>
-              <InputNumber min={0} precision={2} style={{ width: "100%" }} />
-            </Form.Item>
-          </Flex>
+          <Form.Item label={`数量（当前 ${formatQuantity(stock)}）`} name="quantity" rules={[{ required: true, message: "请输入数量" }]}>
+            <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+          </Form.Item>
           {shortage ? <Alert message="当前库存不足，提交会被服务端拒绝。" showIcon style={{ marginBottom: 16 }} type="warning" /> : null}
           <FormActions label="保存出库" saving={saving} onCancel={() => setOpen(false)} />
         </Form>

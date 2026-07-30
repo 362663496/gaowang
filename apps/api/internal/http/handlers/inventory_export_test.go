@@ -2,6 +2,8 @@ package handlers_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -17,6 +19,71 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/xuri/excelize/v2"
 )
+
+func Test_InventoryList_sorts_before_pagination_and_uses_current_product_price(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := openHandlerTestDB(t, append(authModels(), &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{})...)
+	user := models.User{Name: "Admin", Email: "inventory-list@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	token := createSessionToken(t, db, user.ID)
+
+	products := []models.Product{
+		{Name: "Beta", Code: "C", DefaultPurchaseCents: 300, Enabled: true},
+		{Name: "Alpha", Code: "B", DefaultPurchaseCents: 200, Enabled: true},
+		{Name: "Alpha", Code: "A", DefaultPurchaseCents: 125, Enabled: true},
+		{Name: "Never stocked", Code: "NONE", DefaultPurchaseCents: 999, Enabled: true},
+	}
+	for index := range products {
+		if err := db.Create(&products[index]).Error; err != nil {
+			t.Fatalf("create product: %v", err)
+		}
+	}
+	snapshots := []models.InventorySnapshot{
+		{ProductID: products[0].ID, Quantity: 0, MovingAverageCostCents: 9, InventoryValueCents: 9},
+		{ProductID: products[1].ID, Quantity: 2, MovingAverageCostCents: 9, InventoryValueCents: 9},
+		{ProductID: products[2].ID, Quantity: 4, MovingAverageCostCents: 9, InventoryValueCents: 9},
+	}
+	for _, snapshot := range snapshots {
+		if err := db.Create(&snapshot).Error; err != nil {
+			t.Fatalf("create snapshot: %v", err)
+		}
+	}
+
+	router := apihttp.NewRouter(testConfig(), db)
+	wantCodes := []string{"A", "B", "C"}
+	wantNames := []string{"Alpha", "Alpha", "Beta"}
+	wantValues := []int64{500, 400, 0}
+	for page := 1; page <= 3; page++ {
+		response := doJSON(t, router, http.MethodGet, "/api/v1/inventory?page_size=1&page="+fmt.Sprint(page), token, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("page %d status = %d body=%s", page, response.Code, response.Body.String())
+		}
+		var body struct {
+			Items []struct {
+				Product struct {
+					Name string
+					Code string
+				}
+				InventoryValueCents int64
+			} `json:"items"`
+			Pagination struct {
+				Total int64 `json:"total"`
+			} `json:"pagination"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode page %d: %v", page, err)
+		}
+		if len(body.Items) != 1 || body.Pagination.Total != 3 {
+			t.Fatalf("page %d body = %+v, want one of three snapshots", page, body)
+		}
+		item := body.Items[0]
+		if item.Product.Name != wantNames[page-1] || item.Product.Code != wantCodes[page-1] || item.InventoryValueCents != wantValues[page-1] {
+			t.Fatalf("page %d item = %+v, want %s/%s/%d", page, item, wantNames[page-1], wantCodes[page-1], wantValues[page-1])
+		}
+	}
+}
 
 func Test_InventoryExport_embeds_images_and_respects_low_stock_filter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -35,11 +102,11 @@ func Test_InventoryExport_embeds_images_and_respects_low_stock_filter(t *testing
 
 	withImage := models.Product{
 		Name: "绿茶", Code: "TEA-GREEN", ImagePath: "/uploads/" + imageName,
-		LowStockThreshold: 5, Enabled: true,
+		DefaultPurchaseCents: 175, LowStockThreshold: 5, Enabled: true,
 	}
 	lowStock := models.Product{
 		Name: "红茶", Code: "TEA-RED", ImagePath: "/uploads/missing.png",
-		LowStockThreshold: 10, Enabled: true,
+		DefaultPurchaseCents: 225, LowStockThreshold: 10, Enabled: true,
 	}
 	archived := models.Product{
 		Name: "归档茶", Code: "TEA-ARCH", Enabled: false,
@@ -93,7 +160,7 @@ func Test_InventoryExport_embeds_images_and_respects_low_stock_filter(t *testing
 	if len(rows) != 3 {
 		t.Fatalf("row count = %d, want 3 (header + 2 active)", len(rows))
 	}
-	wantHeaders := []string{"图片", "商品名称", "商品编码", "数量", "移动平均成本", "库存金额", "库存状态", "更新时间"}
+	wantHeaders := []string{"图片", "商品名称", "商品编码", "数量", "商品进货价", "库存金额", "库存状态", "更新时间"}
 	if len(rows[0]) < len(wantHeaders) {
 		t.Fatalf("headers = %#v, want at least %#v", rows[0], wantHeaders)
 	}
@@ -112,6 +179,12 @@ func Test_InventoryExport_embeds_images_and_respects_low_stock_filter(t *testing
 	}
 	if got := cellText(rows, 1, 3); got != "3" {
 		t.Fatalf("first data qty = %q, want 3", got)
+	}
+	if got := cellText(rows, 1, 4); got != "2.25" {
+		t.Fatalf("first data purchase price = %q, want 2.25", got)
+	}
+	if got := cellText(rows, 1, 5); got != "6.75" {
+		t.Fatalf("first data inventory value = %q, want 6.75", got)
 	}
 	if got := cellText(rows, 1, 6); got != "低库存" {
 		t.Fatalf("first data status = %q, want 低库存", got)

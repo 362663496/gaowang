@@ -15,8 +15,8 @@ Use a stable machine-readable uppercase code and a concise user-facing message. 
 - JSON handlers define request structs with Gin `binding` tags and call `bindJSON`.
 - Parse identifiers at the boundary with `parseUUID` before calling a service.
 - Multipart endpoints validate required text and numeric form fields in a focused parser such as `productFromForm`/`formInt`.
-- Use pointer fields when zero is valid but omission is not. `inboundRequest.UnitCents` and `outboundRequest.SaleUnitCents` preserve that distinction.
-- Keep compatibility decoding localized to the request type, as `outboundRequest.UnmarshalJSON` does for the legacy camel-case price field.
+- Use pointer fields when zero is valid but omission is not, such as `movementUpdateRequest.ExpectedRevision`.
+- Inventory mutations never accept operation-level prices; the service reads current prices from the locked product row.
 
 ## Service Errors
 

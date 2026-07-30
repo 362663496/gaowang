@@ -86,6 +86,8 @@ Responses keep `items` and add:
 - Clamp a page beyond the result set to the last page. Empty results use `total_pages: 0`.
 - `all=true` bypasses offset/limit but preserves the same response shape. Use it only for bounded option, summary, dashboard, or report consumers—not real list pages.
 - Frontend collection types use `Paginated<T>` and reset `page` to `1` when filters change.
+- Inventory sorts the complete filtered result by product name, product code, then product ID before pagination.
+- Stock movements accept optional `from`/`to` `YYYY-MM-DD` filters on immutable `created_at`; both dates are inclusive days interpreted at fixed UTC+8 boundaries.
 
 ### 4. Validation & Error Matrix
 
@@ -211,21 +213,21 @@ Both endpoints accept exactly one JSON object with `expected_revision`, `note`, 
 {
   "expected_revision": 1,
   "quantity": 8,
-  "unit_cents": 350,
   "shop_id": null,
   "note": "业务备注",
   "change_reason": "录入错误"
 }
 ```
 
-- Inbound: positive `quantity`, nonnegative `unit_cents`, optional `shop_id`; no `quantity_delta`.
-- Sales outbound: positive `quantity`, nonnegative `unit_cents`, required `shop_id`; no `quantity_delta`.
+- Inbound: positive `quantity`, optional `shop_id`; no `quantity_delta` or operation price.
+- Sales outbound: positive `quantity`, required `shop_id`; no `quantity_delta` or operation price.
 - Adjustment: nonzero `quantity_delta`, required `note`, no quantity/unit/shop.
 - `note` and `change_reason` are at most 500 characters; `change_reason` is always required and exists only in audit metadata.
-- Product, type, original operator, and `created_at` are absent from the request and immutable. Unknown JSON fields are rejected.
+- Product, type, original operator, `created_at`, and all price fields are absent from the request and immutable. Unknown JSON fields, including legacy `unit_cents`, are rejected.
 - Only the latest movement for the product under `created_at DESC, id DESC` is editable. Metadata-only edits are allowed for an archived product; numeric edits are not.
 - Preview returns `before`, `after`, `impact`, and `expected_revision`. Save returns the revised `item` and the same impact shape.
-- Numeric save reverses the saved latest effect from the current snapshot and reapplies the same pure transition used by create. It updates the original row and increments `revision`; no movement is appended or deleted.
+- Numeric save reverses the saved `QuantityDelta` from the current snapshot and reapplies the same pure transition used by create with the product's current default prices. It updates the original row and increments `revision`; no movement is appended or deleted.
+- Inventory value, purchase amount, sales revenue, cost, and gross profit in list/preview/update responses are derived from current product prices, so historical amounts change immediately after a product price update.
 - Snapshot, movement, last editor/time, and complete `movement.updated` audit commit in one transaction.
 
 ### 4. Validation & Error Matrix
@@ -248,9 +250,9 @@ Both endpoints accept exactly one JSON object with `expected_revision`, `note`, 
 
 ### 6. Tests Required
 
-- Service: all three transitions, moving-average/rounding behavior, metadata-only edit, archived numeric rejection, insufficient stock, stale ID/version, preview no-write, and audit-failure rollback.
-- Route: independent permission on preview/PATCH, strict unknown-field rejection, safe operator DTO without `PasswordHash`, `IsLatest`, stable error codes, and immutable identity/time.
-- Report: an edited sale remains in its original `created_at` period with corrected revenue/cost/gross.
+- Service: all three transitions, zero/current product prices, metadata-only edit, archived numeric rejection, insufficient stock, stale ID/version, preview no-write, and audit-failure rollback.
+- Route: independent permission on preview/PATCH, strict legacy-price rejection, safe operator DTO without `PasswordHash`, `IsLatest`, stable error codes, and immutable identity/time.
+- Report: an edited sale remains in its original `created_at` period while revenue/cost/gross use the product's current prices.
 
 ### 7. Wrong vs Correct
 

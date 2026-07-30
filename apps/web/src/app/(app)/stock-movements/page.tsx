@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
   Descriptions,
   Flex,
   Form,
@@ -36,12 +37,11 @@ import type {
   StockMovement,
 } from "@/features/types";
 import { ApiError, apiGet, apiPost, request } from "@/lib/api";
-import { centsToYuanInput, formatDateTime, formatMoney, formatQuantity, yuanToCents } from "@/lib/format";
+import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 
 type EditValues = {
   quantity?: number;
   quantity_delta?: number;
-  unit_yuan?: number;
   shop_id?: string;
   note: string;
   change_reason: string;
@@ -57,6 +57,7 @@ export default function StockMovementsPage() {
   const [type, setType] = useState("");
   const [productID, setProductID] = useState("");
   const [shopID, setShopID] = useState("");
+  const [dateRange, setDateRange] = useState<[string, string] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
@@ -67,8 +68,12 @@ export default function StockMovementsPage() {
     if (type) query.set("type", type);
     if (productID) query.set("product_id", productID);
     if (shopID) query.set("shop_id", shopID);
+    if (dateRange) {
+      query.set("from", dateRange[0]);
+      query.set("to", dateRange[1]);
+    }
     return query.toString();
-  }, [page, productID, shopID, type]);
+  }, [dateRange, page, productID, shopID, type]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -151,7 +156,7 @@ export default function StockMovementsPage() {
       <Card className="filter-card">
         <Form layout="vertical" requiredMark={false}>
           <Row gutter={[14, 0]}>
-            <Col lg={8} sm={12} xs={24}>
+            <Col lg={6} sm={12} xs={24}>
               <Form.Item label="类型" style={{ marginBottom: 0 }}>
                 <Select
                   allowClear
@@ -166,7 +171,7 @@ export default function StockMovementsPage() {
                 />
               </Form.Item>
             </Col>
-            <Col lg={8} sm={12} xs={24}>
+            <Col lg={6} sm={12} xs={24}>
               <Form.Item label="商品" style={{ marginBottom: 0 }}>
                 <ProductCombobox
                   allowClear
@@ -177,7 +182,7 @@ export default function StockMovementsPage() {
                 />
               </Form.Item>
             </Col>
-            <Col lg={8} sm={12} xs={24}>
+            <Col lg={6} sm={12} xs={24}>
               <Form.Item label="店铺" style={{ marginBottom: 0 }}>
                 <Select
                   allowClear
@@ -188,6 +193,20 @@ export default function StockMovementsPage() {
                   showSearch
                   value={shopID || undefined}
                   onChange={(value) => { setShopID(value ?? ""); setPage(1); }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={6} sm={12} xs={24}>
+              <Form.Item label="时间范围" style={{ marginBottom: 0 }}>
+                <DatePicker.RangePicker
+                  allowClear
+                  format="YYYY-MM-DD"
+                  placeholder={["开始日期", "结束日期"]}
+                  style={{ width: "100%" }}
+                  onChange={(_, dates) => {
+                    setDateRange(dates?.[0] && dates[1] ? [dates[0], dates[1]] : null);
+                    setPage(1);
+                  }}
                 />
               </Form.Item>
             </Col>
@@ -244,7 +263,6 @@ function MovementEditor({
   const [saving, setSaving] = useState(false);
   const [stale, setStale] = useState(false);
   const archived = Boolean(movement.Product.ArchivedAt);
-  const unitCents = movement.Type === "inbound" ? movement.PurchaseUnitCents : movement.SaleUnitCents;
 
   async function preview(values: EditValues) {
     setPreviewing(true);
@@ -315,7 +333,6 @@ function MovementEditor({
           initialValues={{
             quantity: movement.Type === "adjustment" ? undefined : Math.abs(movement.QuantityDelta),
             quantity_delta: movement.Type === "adjustment" ? movement.QuantityDelta : undefined,
-            unit_yuan: unitCents == null ? undefined : Number(centsToYuanInput(unitCents)),
             shop_id: movement.ShopID ?? undefined,
             note: movement.Reason,
             change_reason: "",
@@ -329,19 +346,9 @@ function MovementEditor({
               <InputNumber disabled={archived} precision={0} style={{ width: "100%" }} />
             </Form.Item>
           ) : (
-            <Flex gap={14} wrap>
-              <Form.Item label="数量" name="quantity" rules={[{ required: true, message: "请输入数量" }]} style={{ flex: 1, minWidth: 180 }}>
-                <InputNumber disabled={archived} min={1} precision={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item
-                label={movement.Type === "inbound" ? "进货单价（元）" : "销售单价（元）"}
-                name="unit_yuan"
-                rules={[{ required: true, message: "请输入单价" }]}
-                style={{ flex: 1, minWidth: 180 }}
-              >
-                <InputNumber disabled={archived} min={0} precision={2} style={{ width: "100%" }} />
-              </Form.Item>
-            </Flex>
+            <Form.Item label="数量" name="quantity" rules={[{ required: true, message: "请输入数量" }]}>
+              <InputNumber disabled={archived} min={1} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
           )}
           {movement.Type !== "adjustment" ? (
             <Form.Item
@@ -382,16 +389,12 @@ function MovementEditor({
 function MovementImpactPreview({ movement, preview, shops }: { movement: StockMovement; preview: MovementPreview; shops: Shop[] }) {
   const beforeQuantity = movement.Type === "sales_outbound" ? -preview.before.quantity_delta : preview.before.quantity_delta;
   const afterQuantity = movement.Type === "sales_outbound" ? -preview.after.quantity_delta : preview.after.quantity_delta;
-  const beforeUnit = movement.Type === "inbound" ? preview.before.purchase_unit_cents : preview.before.sale_unit_cents;
-  const afterUnit = movement.Type === "inbound" ? preview.after.purchase_unit_cents : preview.after.sale_unit_cents;
   const items = [
     { key: "quantity", label: "流水数量", children: `${formatQuantity(beforeQuantity)} → ${formatQuantity(afterQuantity)}` },
-    ...(movement.Type === "adjustment" ? [] : [{ key: "unit", label: "单价", children: `${formatMoney(beforeUnit ?? 0)} → ${formatMoney(afterUnit ?? 0)}` }]),
     ...(movement.Type === "adjustment" ? [] : [{ key: "shop", label: "店铺", children: `${shopName(shops, preview.before.shop_id)} → ${shopName(shops, preview.after.shop_id)}` }]),
     { key: "note", label: "备注", children: `${preview.before.note || "-"} → ${preview.after.note || "-"}` },
     { key: "stock", label: "当前 / 结果库存", children: `${formatQuantity(preview.impact.current_quantity)} → ${formatQuantity(preview.impact.result_quantity)}` },
     { key: "value", label: "当前 / 结果库存金额", children: `${formatMoney(preview.impact.current_inventory_value_cents)} → ${formatMoney(preview.impact.result_inventory_value_cents)}` },
-    { key: "average", label: "当前 / 结果移动平均成本", children: `${formatMoney(preview.impact.current_moving_average_cost_cents)} → ${formatMoney(preview.impact.result_moving_average_cost_cents)}` },
     ...(movement.Type === "inbound" ? [{ key: "purchase", label: "采购金额变化", children: formatMoney(preview.impact.purchase_amount_delta_cents) }] : []),
     ...(movement.Type === "sales_outbound" ? [
       { key: "revenue", label: "收入变化", children: formatMoney(preview.impact.revenue_delta_cents) },
@@ -419,7 +422,6 @@ function movementPayload(movement: StockMovement, values: EditValues): Record<st
     return base;
   }
   base.quantity = values.quantity;
-  base.unit_cents = yuanToCents(String(values.unit_yuan ?? 0));
   base.shop_id = values.shop_id ?? null;
   return base;
 }
