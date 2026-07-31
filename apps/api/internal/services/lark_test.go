@@ -15,35 +15,16 @@ import (
 	larktypes "github.com/larksuite/oapi-sdk-go/v3/channel/types"
 )
 
-func Test_Lark_parse_command_supports_fixed_commands(t *testing.T) {
-	mention := larktypes.Mention{Key: "@_user_1", IsBot: true}
-	tests := []struct {
-		name    string
-		message larktypes.NormalizedMessage
-		action  string
-		keyword string
-	}{
-		{name: "inventory", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 查库存 绿茶", Mentions: []larktypes.Mention{mention}}, action: larkActionInventory, keyword: "绿茶"},
-		{name: "product", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 查商品 SKU-1", Mentions: []larktypes.Mention{mention}}, action: larkActionProduct, keyword: "SKU-1"},
-		{name: "product without keyword", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 查商品", Mentions: []larktypes.Mention{mention}}, action: larkActionProduct},
-		{name: "low stock", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 低库存", Mentions: []larktypes.Mention{mention}}, action: larkActionLowStock},
-		{name: "summary", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 库存概览", Mentions: []larktypes.Mention{mention}}, action: larkActionSummary},
-		{name: "movements", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 查流水 绿茶", Mentions: []larktypes.Mention{mention}}, action: larkActionMovements, keyword: "绿茶"},
-		{name: "all movements", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 查流水", Mentions: []larktypes.Mention{mention}}, action: larkActionMovements},
-		{name: "today changes", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 今日变动", Mentions: []larktypes.Mention{mention}}, action: larkActionTodayChanges},
-		{name: "help", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 帮助", Mentions: []larktypes.Mention{mention}}, action: larkActionHelp},
-		{name: "missing keyword", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 查库存", Mentions: []larktypes.Mention{mention}}, action: larkActionHelp},
-		{name: "unknown", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 盘点", Mentions: []larktypes.Mention{mention}}, action: larkActionUnknown},
-		{name: "low stock with argument", message: larktypes.NormalizedMessage{RawContentType: "text", Content: "@_user_1 低库存 茶", Mentions: []larktypes.Mention{mention}}, action: larkActionHelp, keyword: "茶"},
-		{name: "unsupported message", message: larktypes.NormalizedMessage{RawContentType: "image", Content: "[image]", Mentions: []larktypes.Mention{mention}}, action: larkActionHelp},
+func Test_Lark_message_text_removes_only_bot_mentions(t *testing.T) {
+	message := larktypes.NormalizedMessage{
+		Content: "@_bot 帮 @_user 看库存",
+		Mentions: []larktypes.Mention{
+			{Key: "@_bot", IsBot: true},
+			{Key: "@_user"},
+		},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			command := parseLarkCommand(test.message)
-			if command.Action != test.action || command.Keyword != test.keyword {
-				t.Fatalf("command = %+v, want action=%s keyword=%q", command, test.action, test.keyword)
-			}
-		})
+	if text := larkMessageText(message); text != "帮 @_user 看库存" {
+		t.Fatalf("message text = %q", text)
 	}
 }
 
@@ -74,10 +55,11 @@ func Test_Lark_query_filters_sorts_and_limits_results(t *testing.T) {
 	db := newInventoryTestDB(t)
 	for index := 0; index < 7; index++ {
 		product := models.Product{
-			Name:              "商品" + string(rune('A'+index)),
-			Code:              "SKU-" + string(rune('A'+index)),
-			LowStockThreshold: 4,
-			Enabled:           true,
+			Name:                 "商品" + string(rune('A'+index)),
+			Code:                 "SKU-" + string(rune('A'+index)),
+			DefaultPurchaseCents: int64(700 - index*100),
+			LowStockThreshold:    4,
+			Enabled:              true,
 		}
 		if err := db.Create(&product).Error; err != nil {
 			t.Fatalf("create product: %v", err)
@@ -122,37 +104,52 @@ func Test_Lark_query_filters_sorts_and_limits_results(t *testing.T) {
 		t.Fatalf("low-stock rows = %+v more=%t err=%v", rows, more, err)
 	}
 
+	rows, more, err = queryLarkProducts(db, larkCommand{Action: larkActionOutOfStock})
+	if err != nil || more || len(rows) != 2 || rows[0].Code != "SKU-A" || rows[1].Code != "NO-SNAPSHOT" {
+		t.Fatalf("out-of-stock rows = %+v more=%t err=%v", rows, more, err)
+	}
+
+	rows, more, err = queryLarkProducts(db, larkCommand{Action: larkActionValueRanking})
+	if err != nil || !more || len(rows) != 5 {
+		t.Fatalf("value-ranking rows = %+v more=%t err=%v", rows, more, err)
+	}
+	wantCodes := []string{"SKU-D", "SKU-E", "SKU-C", "SKU-F", "SKU-B"}
+	for index, want := range wantCodes {
+		if rows[index].Code != want {
+			t.Fatalf("value-ranking row %d = %s, want %s", index, rows[index].Code, want)
+		}
+	}
+
 	rows, more, err = queryLarkProducts(db, larkCommand{Action: larkActionInventory, Keyword: "missing"})
 	if err != nil || more || len(rows) != 0 {
 		t.Fatalf("missing rows = %+v more=%t err=%v", rows, more, err)
 	}
 }
 
-func Test_Lark_help_has_one_inventory_entry_and_legacy_product_command_migrates(t *testing.T) {
+func Test_Lark_help_uses_natural_language_examples_for_all_features(t *testing.T) {
 	help, err := larkHelpCard()
-	if err != nil || strings.Contains(help, "查商品") || !strings.Contains(help, "查库存") ||
-		!strings.Contains(help, "库存概览") || !strings.Contains(help, "查流水") || !strings.Contains(help, "今日变动") {
+	if err != nil || strings.Contains(help, "固定命令") || !strings.Contains(help, "BR-1214G") ||
+		!strings.Contains(help, "缺货商品") || !strings.Contains(help, "库存金额最高") || !strings.Contains(help, "卖得最好") {
 		t.Fatalf("help card = %s err=%v", help, err)
-	}
-	migration, err := larkProductMigrationCard()
-	if err != nil || !strings.Contains(migration, "查商品") || !strings.Contains(migration, "已合并到") || !strings.Contains(migration, "查库存") {
-		t.Fatalf("migration card = %s err=%v", migration, err)
 	}
 }
 
-func Test_Lark_cards_show_current_prices_and_stock_transition(t *testing.T) {
+func Test_Lark_cards_show_purchase_price_prominent_quantity_and_stock_transition(t *testing.T) {
 	product := models.Product{
 		Name: "绿茶", Code: "TEA-1", DefaultPurchaseCents: 123, DefaultSaleCents: 456,
 		LowStockThreshold: 5, Enabled: true,
 	}
-	productCard, err := larkProductCard(larkProductRow{Product: product, Quantity: 3}, "img_test")
+	productCard, err := larkProductCard("商品详情", "blue", larkProductRow{Product: product, Quantity: 3}, "img_test")
 	if err != nil {
 		t.Fatalf("build product card: %v", err)
 	}
-	for _, expected := range []string{"img_test", "绿茶", "TEA-1", "¥1.23", "¥4.56", "¥3.69", "低库存"} {
+	for _, expected := range []string{"img_test", "绿茶", "TEA-1", "采购价", "¥1.23", "¥3.69", "库存数量：3 件", "低库存"} {
 		if !strings.Contains(productCard, expected) {
 			t.Fatalf("product card does not contain %q: %s", expected, productCard)
 		}
+	}
+	if strings.Contains(productCard, "售价") || strings.Contains(productCard, "¥4.56") {
+		t.Fatalf("product card contains sale price: %s", productCard)
 	}
 	var productPayload struct {
 		Elements []struct {
@@ -171,8 +168,13 @@ func Test_Lark_cards_show_current_prices_and_stock_transition(t *testing.T) {
 	if len(productPayload.Elements) != 1 || productPayload.Elements[0].Tag != "div" ||
 		productPayload.Elements[0].Extra == nil || productPayload.Elements[0].Extra.Tag != "img" ||
 		productPayload.Elements[0].Extra.ImgKey != "img_test" || !productPayload.Elements[0].Extra.Preview ||
-		len(productPayload.Elements[0].Fields) < 5 || strings.Contains(productCard, "fit_horizontal") {
+		len(productPayload.Elements[0].Fields) != 3 || strings.Contains(productCard, "fit_horizontal") {
 		t.Fatalf("product card is not compact div/extra layout: %s", productCard)
+	}
+	outOfStockCard, err := larkProductCard("商品详情", "blue", larkProductRow{Product: product, Quantity: 0}, "")
+	if err != nil || !strings.Contains(outOfStockCard, `"template":"red"`) ||
+		!strings.Contains(outOfStockCard, "⛔ 缺货") || !strings.Contains(outOfStockCard, "库存数量：0 件") {
+		t.Fatalf("out-of-stock product card = %s err=%v", outOfStockCard, err)
 	}
 	messenger := newLarkMessenger(lark.NewClient("cli_test", "secret"), t.TempDir(), "oc_test")
 	if imageKey := messenger.imageKey(context.Background(), "/uploads/missing.png"); imageKey != "" {

@@ -25,15 +25,22 @@ func Test_DeepSeek_maps_common_inventory_language_to_whitelisted_commands(t *tes
 		{input: "BR-1214G 有没有货", result: `{"intent":"inventory","keyword":"BR-1214G"}`, action: larkActionInventory, keyword: "BR-1214G"},
 		{input: "绿茶现在状态正常吗", result: `{"intent":"inventory","keyword":"绿茶"}`, action: larkActionInventory, keyword: "绿茶"},
 		{input: "绿茶的库存值多少钱", result: `{"intent":"inventory","keyword":"绿茶"}`, action: larkActionInventory, keyword: "绿茶"},
+		{input: "查商品 BR-1214G", result: `{"intent":"inventory","keyword":"BR-1214G"}`, action: larkActionInventory, keyword: "BR-1214G"},
 		{input: "哪些商品快没了？", result: `{"intent":"low_stock"}`, action: larkActionLowStock},
 		{input: "哪些需要补货", result: `{"intent":"low_stock"}`, action: larkActionLowStock},
 		{input: "列一下低于库存线的商品", result: `{"intent":"low_stock"}`, action: larkActionLowStock},
 		{input: "当前低库存有多少种", result: `{"intent":"low_stock"}`, action: larkActionLowStock},
+		{input: "哪些商品已经没货了", result: `{"intent":"out_of_stock"}`, action: larkActionOutOfStock},
+		{input: "把零库存商品列出来", result: `{"intent":"out_of_stock"}`, action: larkActionOutOfStock},
+		{input: "茶类里哪些缺货", result: `{"intent":"out_of_stock","keyword":"茶"}`, action: larkActionOutOfStock, keyword: "茶"},
 		{input: "总库存有多少件", result: `{"intent":"inventory_summary"}`, action: larkActionSummary},
 		{input: "整体库存金额是多少", result: `{"intent":"inventory_summary"}`, action: larkActionSummary},
 		{input: "现在有多少个商品", result: `{"intent":"inventory_summary"}`, action: larkActionSummary},
 		{input: "有多少商品没库存", result: `{"intent":"inventory_summary"}`, action: larkActionSummary},
 		{input: "看下整体库存情况", result: `{"intent":"inventory_summary"}`, action: larkActionSummary},
+		{input: "库存金额最高的商品有哪些", result: `{"intent":"inventory_value_ranking"}`, action: larkActionValueRanking},
+		{input: "按库存价值排个前五", result: `{"intent":"inventory_value_ranking"}`, action: larkActionValueRanking},
+		{input: "哪些货压的钱最多", result: `{"intent":"inventory_value_ranking"}`, action: larkActionValueRanking},
 		{input: "最近谁动过库存", result: `{"intent":"movements"}`, action: larkActionMovements},
 		{input: "绿茶最近的出入库记录", result: `{"intent":"movements","keyword":"绿茶"}`, action: larkActionMovements, keyword: "绿茶"},
 		{input: "TEA-1 最近有没有操作", result: `{"intent":"movements","keyword":"TEA-1"}`, action: larkActionMovements, keyword: "TEA-1"},
@@ -42,8 +49,14 @@ func Test_DeepSeek_maps_common_inventory_language_to_whitelisted_commands(t *tes
 		{input: "今天出库多少", result: `{"intent":"today_changes"}`, action: larkActionTodayChanges},
 		{input: "今天调整了几次", result: `{"intent":"today_changes"}`, action: larkActionTodayChanges},
 		{input: "今天库存总变动", result: `{"intent":"today_changes"}`, action: larkActionTodayChanges},
+		{input: "今天什么卖得最好", result: `{"intent":"today_sales_ranking"}`, action: larkActionTodaySalesRanking},
+		{input: "今日销售数量排行", result: `{"intent":"today_sales_ranking"}`, action: larkActionTodaySalesRanking},
+		{input: "今天卖出去最多的商品", result: `{"intent":"today_sales_ranking"}`, action: larkActionTodaySalesRanking},
 		{input: "你会干什么", result: `{"intent":"help"}`, action: larkActionHelp},
 		{input: "明天天气怎么样", result: `{"intent":"unknown"}`, action: larkActionUnknown},
+	}
+	if len(tests) < 30 {
+		t.Fatalf("natural-language cases = %d, want at least 30", len(tests))
 	}
 	results := make(map[string]string, len(tests))
 	for _, test := range tests {
@@ -76,6 +89,12 @@ func Test_DeepSeek_maps_common_inventory_language_to_whitelisted_commands(t *tes
 			len(payload.Messages) != 2 || payload.Messages[0].Role != "system" || payload.Messages[1].Role != "user" {
 			t.Errorf("request payload = %+v", payload)
 		}
+		if strings.Contains(payload.Messages[0].Content, "售价") ||
+			!strings.Contains(payload.Messages[0].Content, "out_of_stock") ||
+			!strings.Contains(payload.Messages[0].Content, "inventory_value_ranking") ||
+			!strings.Contains(payload.Messages[0].Content, "today_sales_ranking") {
+			t.Errorf("system prompt = %q", payload.Messages[0].Content)
+		}
 		result, ok := results[payload.Messages[1].Content]
 		if !ok {
 			t.Errorf("unexpected user content %q", payload.Messages[1].Content)
@@ -105,7 +124,7 @@ func Test_DeepSeek_maps_common_inventory_language_to_whitelisted_commands(t *tes
 	}
 }
 
-func Test_Lark_fixed_commands_bypass_deepseek(t *testing.T) {
+func Test_Lark_all_text_messages_use_deepseek_without_fixed_command_priority(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		requests++
@@ -116,36 +135,39 @@ func Test_Lark_fixed_commands_bypass_deepseek(t *testing.T) {
 	mention := larktypes.Mention{Key: "@bot", IsBot: true}
 
 	command, err := bot.resolveCommand(context.Background(), larktypes.NormalizedMessage{
-		RawContentType: "text", Content: "@bot 库存概览", Mentions: []larktypes.Mention{mention},
-	})
-	if err != nil || command.Action != larkActionSummary || requests != 0 {
-		t.Fatalf("fixed command = %+v err=%v requests=%d", command, err, requests)
-	}
-	command, err = bot.resolveCommand(context.Background(), larktypes.NormalizedMessage{
-		RawContentType: "text", Content: "@bot 帮我看下总库存", Mentions: []larktypes.Mention{mention},
+		RawContentType: "text", Content: "@bot 查库存 BR-1214G", Mentions: []larktypes.Mention{mention},
 	})
 	if err != nil || command.Action != larkActionSummary || requests != 1 {
-		t.Fatalf("natural command = %+v err=%v requests=%d", command, err, requests)
+		t.Fatalf("first AI command = %+v err=%v requests=%d", command, err, requests)
+	}
+	command, err = bot.resolveCommand(context.Background(), larktypes.NormalizedMessage{
+		RawContentType: "text", Content: "@bot 帮助", Mentions: []larktypes.Mention{mention},
+	})
+	if err != nil || command.Action != larkActionSummary || requests != 2 {
+		t.Fatalf("second AI command = %+v err=%v requests=%d", command, err, requests)
 	}
 }
 
-func Test_Lark_missing_deepseek_key_only_degrades_natural_language(t *testing.T) {
+func Test_Lark_missing_deepseek_key_degrades_all_text_but_keeps_empty_boundaries_local(t *testing.T) {
 	bot := larkBot{}
 	mention := larktypes.Mention{Key: "@bot", IsBot: true}
-	fixed, err := bot.resolveCommand(context.Background(), larktypes.NormalizedMessage{
+	_, err := bot.resolveCommand(context.Background(), larktypes.NormalizedMessage{
 		RawContentType: "text", Content: "@bot 低库存", Mentions: []larktypes.Mention{mention},
 	})
-	if err != nil || fixed.Action != larkActionLowStock {
-		t.Fatalf("fixed command = %+v err=%v", fixed, err)
-	}
-	_, err = bot.resolveCommand(context.Background(), larktypes.NormalizedMessage{
-		RawContentType: "text", Content: "@bot 哪些东西快没了", Mentions: []larktypes.Mention{mention},
-	})
 	if !errors.Is(err, errDeepSeekIntent) {
-		t.Fatalf("natural command error = %v", err)
+		t.Fatalf("text command error = %v", err)
+	}
+	for _, message := range []larktypes.NormalizedMessage{
+		{RawContentType: "text", Content: "@bot", Mentions: []larktypes.Mention{mention}},
+		{RawContentType: "image", Content: "[image]", Mentions: []larktypes.Mention{mention}},
+	} {
+		command, boundaryErr := bot.resolveCommand(context.Background(), message)
+		if boundaryErr != nil || command.Action != larkActionHelp {
+			t.Fatalf("boundary command = %+v err=%v", command, boundaryErr)
+		}
 	}
 	card, cardErr := larkAIUnavailableCard()
-	if cardErr != nil || !strings.Contains(card, "固定命令") {
+	if cardErr != nil || strings.Contains(card, "固定命令") || !strings.Contains(card, "没有执行查询或库存操作") {
 		t.Fatalf("fallback card = %s err=%v", card, cardErr)
 	}
 }
@@ -167,6 +189,8 @@ func Test_DeepSeek_rejects_untrusted_or_failed_responses_without_leaking_secret(
 		{name: "missing inventory keyword", status: http.StatusOK, body: `{"choices":[{"finish_reason":"stop","message":{"content":"{\"intent\":\"inventory\"}"}}]}`},
 		{name: "keyword too long", status: http.StatusOK, body: deepSeekCompletion(`{"intent":"inventory","keyword":"` + longKeyword + `"}`)},
 		{name: "unknown field", status: http.StatusOK, body: deepSeekCompletion(`{"intent":"help","sql":"DROP"}`)},
+		{name: "keyword on summary", status: http.StatusOK, body: deepSeekCompletion(`{"intent":"inventory_summary","keyword":"茶"}`)},
+		{name: "keyword on ranking", status: http.StatusOK, body: deepSeekCompletion(`{"intent":"today_sales_ranking","keyword":"茶"}`)},
 		{name: "multiple objects", status: http.StatusOK, body: deepSeekCompletion(`{"intent":"help"}{"intent":"unknown"}`)},
 	}
 	for _, test := range tests {

@@ -43,14 +43,14 @@ The Compose stack runs PostgreSQL, the Go API, the Next.js web app, and Nginx. N
 
 ## Feishu/Lark Inventory Bot
 
-The optional self-built app bot sends successful inbound, sales outbound, and inventory adjustment notifications to one fixed group. In that group, mention the bot with `查库存 <名称或编码>`, `低库存`, `库存概览`, `查流水 [名称或编码]`, `今日变动`, or `帮助`. The old `查商品` command only points users to `查库存`.
+The optional self-built app bot sends successful inbound, sales outbound, and inventory adjustment notifications to one fixed group. In that group, mention the bot and ask in plain Chinese. It can return product stock, low/out-of-stock lists, inventory summaries and value rankings, recent movements, today's changes, and today's sales ranking. Every product result uses the current purchase price and attempts to include that product's image.
 
 1. Create an enterprise self-built app, enable its bot, and add these permissions: `im:message:send_as_bot`, `im:message.group_at_msg:readonly`, and `im:resource`.
 2. Subscribe to `im.message.receive_v1`, select long-connection event delivery, publish the app, and add the bot to the inventory group.
 3. Set `LARK_APP_ID`, `LARK_APP_SECRET`, and that group's `LARK_CHAT_ID` in `.env`, then restart the API. All three must be set together.
-4. To enable plain-language questions such as `绿茶还有多少？`, set `DEEPSEEK_API_KEY`. `DEEPSEEK_MODEL` defaults to `deepseek-v4-flash`; leaving the key empty disables only AI recognition and keeps every fixed command available.
+4. To enable queries such as `绿茶还有多少？`, set `DEEPSEEK_API_KEY`. `DEEPSEEK_MODEL` defaults to `deepseek-v4-flash`; leaving the key empty keeps notifications available but query messages receive a temporary-unavailable response.
 
-Natural-language messages are sent to DeepSeek only for whitelist intent classification; stock data, credentials, and chat history stay local. See the [DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/). No public callback route or Nginx change is needed. Leave all three `LARK_*` variables empty to disable the integration or roll it back.
+All non-empty text messages are sent to DeepSeek only for whitelist intent classification; stock data, credentials, and chat history stay local. See the [DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/). No public callback route or Nginx change is needed. Leave all three `LARK_*` variables empty to disable the integration or roll it back.
 
 ## Restore
 
