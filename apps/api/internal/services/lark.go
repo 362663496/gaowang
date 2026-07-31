@@ -39,6 +39,7 @@ const (
 	larkActionMovements         = "lark.query_movements"
 	larkActionTodayChanges      = "lark.query_today_changes"
 	larkActionTodaySalesRanking = "lark.query_today_sales_ranking"
+	larkActionAnalytics         = "lark.query_analytics"
 	larkActionHelp              = "lark.help"
 	larkActionUnknown           = "lark.unknown"
 )
@@ -186,9 +187,10 @@ func (b *larkBot) run(ctx context.Context) {
 }
 
 type larkCommand struct {
-	Action  string
-	Name    string
-	Keyword string
+	Action    string
+	Name      string
+	Keyword   string
+	Analytics *larkAnalyticsPlan
 }
 
 func larkMessageText(message larktypes.NormalizedMessage) string {
@@ -272,6 +274,21 @@ func (b *larkBot) handle(ctx context.Context, message larktypes.NormalizedMessag
 		if err == nil {
 			card, err = larkTodayChangesCard(changes)
 		}
+	case command.Action == larkActionAnalytics:
+		if command.Analytics == nil {
+			err = errDeepSeekIntent
+			break
+		}
+		var rows []larkAnalyticsRow
+		var more bool
+		rows, more, err = queryLarkAnalytics(b.db, *command.Analytics, time.Now())
+		if err == nil {
+			paths := make([]string, len(rows))
+			for index := range rows {
+				paths[index] = rows[index].ImagePath
+			}
+			card, err = larkAnalyticsCard(*command.Analytics, rows, more, b.messenger.resolveImageKeys(ctx, paths))
+		}
 	case command.Action == larkActionUnknown:
 		card, err = larkUnknownCard()
 	default:
@@ -290,12 +307,18 @@ func (b *larkBot) handle(ctx context.Context, message larktypes.NormalizedMessag
 }
 
 func (b *larkBot) recordAudit(message larktypes.NormalizedMessage, command larkCommand) {
-	metadata, err := json.Marshal(map[string]string{
+	values := map[string]string{
 		"chat_id":        message.ChatID,
 		"sender_open_id": message.UserID,
 		"command":        command.Name,
 		"keyword":        command.Keyword,
-	})
+	}
+	if command.Analytics != nil {
+		for key, value := range command.Analytics.auditMetadata() {
+			values[key] = value
+		}
+	}
+	metadata, err := json.Marshal(values)
 	if err != nil {
 		return
 	}
@@ -774,7 +797,8 @@ func larkHelpCard() (string, error) {
 			"- `哪些商品快没了？` / `把缺货商品列出来`\n"+
 			"- `库存总金额是多少？` / `库存金额最高的是哪些？`\n"+
 			"- `绿茶最近谁操作过？`\n"+
-			"- `今天出了多少货？` / `今天什么卖得最好？`")
+			"- `今天出了多少货？` / `今天什么卖得最好？`\n"+
+			"- `哪个店铺出货最多？` / `本月谁操作次数最多？`")
 }
 
 func larkAIUnavailableCard() (string, error) {
@@ -783,7 +807,7 @@ func larkAIUnavailableCard() (string, error) {
 }
 
 func larkUnknownCard() (string, error) {
-	return larkSimpleCard("只支持库存查询", "grey", "我可以查商品库存、低库存、缺货清单、库存概览、库存金额排行、最近流水、今日变动和今日销售排行。问“你会什么”可查看示例。")
+	return larkSimpleCard("只支持库存查询", "grey", "我可以按商品、店铺或操作人查询当前库存、金额、入库、出库和流水统计，也可以查商品详情、低库存、缺货和最近流水。问“你会什么”可查看示例。")
 }
 
 func larkField(content string) *larkcard.MessageCardField {

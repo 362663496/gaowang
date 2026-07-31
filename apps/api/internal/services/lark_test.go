@@ -129,7 +129,8 @@ func Test_Lark_query_filters_sorts_and_limits_results(t *testing.T) {
 func Test_Lark_help_uses_natural_language_examples_for_all_features(t *testing.T) {
 	help, err := larkHelpCard()
 	if err != nil || strings.Contains(help, "固定命令") || !strings.Contains(help, "BR-1214G") ||
-		!strings.Contains(help, "缺货商品") || !strings.Contains(help, "库存金额最高") || !strings.Contains(help, "卖得最好") {
+		!strings.Contains(help, "缺货商品") || !strings.Contains(help, "库存金额最高") || !strings.Contains(help, "卖得最好") ||
+		!strings.Contains(help, "哪个店铺出货最多") || !strings.Contains(help, "谁操作次数最多") {
 		t.Fatalf("help card = %s err=%v", help, err)
 	}
 }
@@ -239,6 +240,36 @@ func Test_Lark_audit_records_query_without_actor(t *testing.T) {
 	}
 	if metadata["chat_id"] != "oc_test" || metadata["sender_open_id"] != "ou_test" || metadata["keyword"] != "TEA" {
 		t.Fatalf("metadata = %+v", metadata)
+	}
+}
+
+func Test_Lark_audit_records_validated_analytics_plan_without_original_message(t *testing.T) {
+	db := newInventoryTestDB(t)
+	bot := larkBot{db: db}
+	plan := larkAnalyticsPlan{
+		Metric: larkMetricMovementQuantity, GroupBy: larkGroupShop,
+		MovementType: larkMovementOutbound, TimeRange: larkTimeAll, Sort: "desc", Limit: 1,
+	}
+	bot.recordAudit(
+		larktypes.NormalizedMessage{MessageID: "om_analytics", ChatID: "oc_test", UserID: "ou_test"},
+		larkCommand{Action: larkActionAnalytics, Name: "自然语言·统计查询", Analytics: &plan},
+	)
+
+	var audit models.AuditLog
+	if err := db.First(&audit).Error; err != nil {
+		t.Fatalf("load audit: %v", err)
+	}
+	var metadata map[string]string
+	if err := json.Unmarshal(audit.Metadata, &metadata); err != nil {
+		t.Fatalf("decode metadata: %v", err)
+	}
+	if audit.Action != larkActionAnalytics || metadata["metric"] != larkMetricMovementQuantity ||
+		metadata["group_by"] != larkGroupShop || metadata["movement_type"] != larkMovementOutbound ||
+		metadata["time_range"] != larkTimeAll || metadata["limit"] != "1" {
+		t.Fatalf("analytics audit = %+v metadata=%+v", audit, metadata)
+	}
+	if _, exists := metadata["message"]; exists {
+		t.Fatalf("analytics audit stored original message: %+v", metadata)
 	}
 }
 

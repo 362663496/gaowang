@@ -5,11 +5,21 @@
 - 继续使用现有 `services.RunLarkBot`、固定群策略、后台队列和飞书长连接。
 - 不增加 HTTP 路由、数据库表、前端页面或第三方 Go 依赖。
 - 业务改动集中在 `apps/api/internal/services`；配置仍由 `internal/config` 读取。
-- DeepSeek 只做无状态意图分类，数据库查询、价格计算、排序、上限和卡片内容均由本地代码控制。
+- DeepSeek 只生成无状态、受控的查询计划，数据库查询、价格计算、排序、上限和卡片内容均由本地代码控制。
 
-## 2. 命令与意图
+## 2. 命令与查询计划
 
-去除机器人提及后，任何非空文本都进入 DeepSeek；本地只处理非文本与空文本边界，不再解析首词或固定命令。DeepSeek 结果只接受：`inventory`、`low_stock`、`out_of_stock`、`inventory_summary`、`inventory_value_ranking`、`movements`、`today_changes`、`today_sales_ranking`、`help`、`unknown`，以及可选 `keyword`。本地校验把结果转换为现有命令结构，白名单外字段或动作直接视为解析失败。
+去除机器人提及后，任何非空文本都进入 DeepSeek；本地只处理非文本与空文本边界，不再解析首词或固定命令。DeepSeek 结果只接受少量直接入口：`inventory`、`low_stock`、`out_of_stock`、`inventory_summary`、`movements`、`today_changes`、`analytics`、`help`、`unknown`。
+
+`analytics` 携带一个结构化计划：
+
+- `metric`: `inventory_quantity`、`inventory_value`、`movement_quantity`、`movement_count`、`movement_value`。
+- `group_by`: `none`、`product`、`shop`、`operator`。
+- `movement_type`: `all`、`inbound`、`sales_outbound`、`adjustment`；当前库存指标不使用该字段。
+- `time_range`: `current`、`today`、`yesterday`、`last_n_days`、`current_month`、`all`；`days` 仅用于近 N 天。
+- `sort`: `asc` / `desc`，`limit`: 1–5；可选商品、店铺、操作人筛选词。
+
+本地一次性校验完整计划。流水未说明时间默认 `all`；库存指标固定 `current`。例如“哪个店铺出货最多”必须得到销售出库数量、按店铺分组、全部历史、倒序、1 条，而不是商品销售排行。
 
 验收语料至少覆盖：
 
@@ -18,16 +28,16 @@
 - 概览：总数量、总金额、商品数、无库存数、整体库存情况。
 - 流水：最近变化、最近操作人、指定商品最近流水、指定商品是否发生过出入库。
 - 今日：今日总变动、今日入库量、今日出库量、今日调整次数。
-- 新功能：缺货/没货清单、库存金额最高/价值排行、今日最好卖/销售排行。
+- 组合统计：店铺出货排行、商品销售排行、操作次数排行、指定店铺/商品/操作人的总量、近 N 天和本月统计。
 
 ## 3. DeepSeek 客户端
 
 - 新增一个小型标准库 HTTP 客户端，不引入 SDK。
 - 请求 `POST https://api.deepseek.com/chat/completions`，使用 `Authorization: Bearer ...`。
 - 默认模型 `deepseek-v4-flash`，显式关闭思考模式，设置 `response_format: {"type":"json_object"}` 和较小输出上限。
-- 系统提示只描述白名单意图、参数约束和 JSON 示例；用户消息只包含移除机器人提及后的文本。
+- 系统提示描述直接入口、统计计划字段、组合约束和典型 JSON 示例；明确维度必须按原问题保留，不得把店铺问题映射为商品排行。
 - `DEEPSEEK_API_KEY` 为空时不创建 AI 解析器；`DEEPSEEK_MODEL` 为空时使用默认模型。
-- HTTP 客户端使用短超时。非 2xx、空内容、截断、非法 JSON、未知意图和关键词超限统一返回受控错误，不读取或记录响应正文。
+- HTTP 客户端使用短超时。非 2xx、空内容、截断、非法 JSON、未知字段、非法组合或边界超限统一返回受控错误，不读取或记录响应正文。
 - 测试通过 `httptest.Server` 注入 endpoint，不新增生产配置项。
 
 DeepSeek 官方文档：
@@ -69,6 +79,14 @@ DeepSeek 官方文档：
 - 今日汇总分别计算入库、销售出库、调整的笔数与数量；不把历史流水中的旧价格作为金额来源。
 - 今日销售排行只聚合上海当日销售出库数量，并 LEFT JOIN 当前库存快照；返回当前库存、采购价、库存金额和今日售出数量。
 
+### 可组合统计
+
+- 当前库存指标使用 `products LEFT JOIN inventory_snapshots`，只支持不分组或按商品分组，并排除归档商品。
+- 流水指标使用 `stock_movements JOIN products`；按店铺或操作人分组/筛选时才加入对应关联表。
+- 时间边界统一以 `Asia/Shanghai` 计算后转 UTC；近 N 天包含今天，未说明时间不加时间条件。
+- SQL 表达式、JOIN、GROUP BY 和 ORDER BY 全部由本地枚举分支选择；模型只提供经过校验的值和参数。
+- 商品统计行附当前库存、采购价和图片；店铺/操作人只展示对应名称与统计值。
+
 ## 5. 卡片与图片
 
 - 抽取一个最小的“按元素构建卡片”入口，现有卡片继续复用。
@@ -78,6 +96,7 @@ DeepSeek 官方文档：
 - 多商品展示与单商品使用同一商品 Markdown 生成函数，避免字段差异。
 - 商品库存数量移到主 Markdown 区，用 `📦`/`⚠️`/`⛔`、粗体和“件”单独强调；短字段只保留状态、采购价、库存金额及排行指标。
 - 商品卡片不再显示售价，所有商品金额相关展示只使用当前采购价。
+- 通用统计卡按时间、指标和分组生成标题；数量、笔数和金额使用明确单位，商品分组继续逐条带图。
 - 通知标题使用语义色：入库/增加为绿色，销售出库/减少为红色，库存调整为蓝色，进入低库存为橙色，恢复正常为绿色；关键数量配合 `⬆️`、`⬇️`、`⚠️` 等符号增强识别。
 - 不依赖仅部分客户端支持的复杂富文本颜色语法；视觉重点由标题语义色、粗体、字段布局和符号共同完成。
 
@@ -88,11 +107,13 @@ DeepSeek 官方文档：
 - 查询或卡片失败：沿用当前日志边界并返回查询失败卡片。
 - 飞书回复失败：记录一次错误，不影响库存系统。
 - “查库存”“查商品”“帮助”等短句与普通句子一样由 DeepSeek 统一识别。
+- 非法查询计划按 AI 解析失败降级；合法但无数据返回空统计卡，不回退到相近功能。
 - 不配置 DeepSeek Key 时通知仍可用，但所有文本查询统一返回暂不可用；回滚整个功能只需部署上一 API 版本，无数据库回滚。
 
 ## 7. 安全
 
 - Key 只存在服务器环境变量；错误、审计、测试快照和日志都不包含 Key。
 - 不把模型输出当 SQL、字段名、排序表达式或工具调用执行。
+- 统计计划中的字符串只进入枚举 `switch` 或参数绑定；排序方向也由本地固定分支选择。
 - 不把库存明细发给 DeepSeek，也不保留聊天上下文。
 - 固定群与 @策略在 AI 之前执行，AI 不扩大访问范围。

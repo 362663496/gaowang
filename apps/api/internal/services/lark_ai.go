@@ -20,16 +20,29 @@ const (
 
 var errDeepSeekIntent = errors.New("deepseek intent parsing failed")
 
-const deepSeekIntentPrompt = `你是库存机器人的意图分类器。只输出一个 JSON 对象，不要回答用户问题。
-JSON 格式：{"intent":"意图","keyword":"可选商品名称或编码"}
-允许的 intent：inventory、low_stock、out_of_stock、inventory_summary、inventory_value_ranking、movements、today_changes、today_sales_ranking、help、unknown。
+const deepSeekIntentPrompt = `你是库存机器人的查询计划生成器。只输出一个 JSON 对象，不要回答用户问题。
+允许的 intent：inventory、low_stock、out_of_stock、inventory_summary、movements、today_changes、analytics、help、unknown。
 inventory 用于查询某个商品的库存、当前采购价、库存金额或状态，必须提取 keyword。
 low_stock 用于查询低库存或补货预警，可选 keyword；out_of_stock 用于列出哪些商品缺货或库存为零，可选 keyword。
-inventory_summary 用于整体商品数、库存数、库存总金额或缺货数量；询问“多少/总计”用它，询问“哪些缺货”用 out_of_stock。
-inventory_value_ranking 用于查询哪些商品库存金额最高、库存价值排行；movements 用于最近流水或操作记录，可选 keyword。
-today_changes 用于今天入库、出库或调整的总量/笔数；today_sales_ranking 用于今天哪些商品卖得最多或销售排行。
-help 用于询问机器人会什么或怎么用。只有 inventory、low_stock、out_of_stock、movements 可以包含 keyword。
-非库存相关问题返回 unknown。keyword 只保留商品名称或编码，不得生成 SQL。`
+inventory_summary 只用于同时查看多项库存概览，或商品种类数、低库存/缺货种类数；单项库存数量或金额统计用 analytics，询问“哪些缺货”用 out_of_stock。
+movements 只用于列出最近流水或操作记录，可选 keyword；today_changes 只用于同时查看今天入库、出库和调整的概览，单项数量/笔数用 analytics。
+help 用于询问机器人会什么或怎么用；非库存相关问题返回 unknown。只有 inventory、low_stock、out_of_stock、movements 可以包含 keyword。
+
+统计、排行、比较、按条件求总量一律使用 analytics，并组合以下字段：
+- metric：inventory_quantity、inventory_value、movement_quantity、movement_count、movement_value。
+- group_by：none、product、shop、operator。必须保留用户问的维度，问店铺就用 shop，问商品就用 product，问谁就用 operator。
+- movement_type：all、inbound、sales_outbound、adjustment；inventory_* 指标留空。
+- time_range：current、today、yesterday、last_n_days、current_month、all。流水没有时间词用 all；inventory_* 只用 current。
+- days：仅 last_n_days 使用，1 到 365；sort：分组时 asc 或 desc；limit：分组时 1 到 5。
+- product_keyword、shop_keyword、operator_keyword：只保留用户明确给出的名称或编码。
+当前库存指标只允许 group_by 为 none 或 product；其余统计使用 movement_* 指标。
+
+示例：
+“哪个店铺出货最多” => {"intent":"analytics","metric":"movement_quantity","group_by":"shop","movement_type":"sales_outbound","time_range":"all","sort":"desc","limit":1}
+“今天哪个商品卖得最好” => {"intent":"analytics","metric":"movement_quantity","group_by":"product","movement_type":"sales_outbound","time_range":"today","sort":"desc","limit":1}
+“近7天张三出库多少” => {"intent":"analytics","metric":"movement_quantity","group_by":"none","movement_type":"sales_outbound","time_range":"last_n_days","days":7,"operator_keyword":"张三"}
+“库存金额最高的商品” => {"intent":"analytics","metric":"inventory_value","group_by":"product","time_range":"current","sort":"desc","limit":5}
+不要把不支持的维度替换成相近维度，不得生成 SQL。`
 
 type deepSeekIntentParser struct {
 	apiKey   string
@@ -75,7 +88,7 @@ func (p *deepSeekIntentParser) Parse(ctx context.Context, input string) (larkCom
 		MaxTokens int `json:"max_tokens"`
 	}{
 		Model:     p.model,
-		MaxTokens: 80,
+		MaxTokens: 220,
 	}
 	payload.Messages = append(payload.Messages,
 		struct {
@@ -131,8 +144,18 @@ func (p *deepSeekIntentParser) Parse(ctx context.Context, input string) (larkCom
 
 func deepSeekResultCommand(content string) (larkCommand, error) {
 	var result struct {
-		Intent  string `json:"intent"`
-		Keyword string `json:"keyword"`
+		Intent          string `json:"intent"`
+		Keyword         string `json:"keyword"`
+		Metric          string `json:"metric"`
+		GroupBy         string `json:"group_by"`
+		MovementType    string `json:"movement_type"`
+		TimeRange       string `json:"time_range"`
+		Days            int    `json:"days"`
+		Sort            string `json:"sort"`
+		Limit           int    `json:"limit"`
+		ProductKeyword  string `json:"product_keyword"`
+		ShopKeyword     string `json:"shop_keyword"`
+		OperatorKeyword string `json:"operator_keyword"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(content))
 	decoder.DisallowUnknownFields()
@@ -145,7 +168,16 @@ func deepSeekResultCommand(content string) (larkCommand, error) {
 
 	result.Intent = strings.TrimSpace(result.Intent)
 	result.Keyword = strings.TrimSpace(result.Keyword)
-	if len([]rune(result.Keyword)) > larkKeywordMaxRunes {
+	if len([]rune(result.Keyword)) > larkKeywordMaxRunes ||
+		len([]rune(result.ProductKeyword)) > larkKeywordMaxRunes ||
+		len([]rune(result.ShopKeyword)) > larkKeywordMaxRunes ||
+		len([]rune(result.OperatorKeyword)) > larkKeywordMaxRunes {
+		return larkCommand{}, errDeepSeekIntent
+	}
+	hasAnalyticsFields := result.Metric != "" || result.GroupBy != "" || result.MovementType != "" ||
+		result.TimeRange != "" || result.Days != 0 || result.Sort != "" || result.Limit != 0 ||
+		result.ProductKeyword != "" || result.ShopKeyword != "" || result.OperatorKeyword != ""
+	if result.Intent != "analytics" && hasAnalyticsFields {
 		return larkCommand{}, errDeepSeekIntent
 	}
 
@@ -164,11 +196,6 @@ func deepSeekResultCommand(content string) (larkCommand, error) {
 			return larkCommand{}, errDeepSeekIntent
 		}
 		return larkCommand{Action: larkActionSummary, Name: "自然语言·库存概览"}, nil
-	case "inventory_value_ranking":
-		if result.Keyword != "" {
-			return larkCommand{}, errDeepSeekIntent
-		}
-		return larkCommand{Action: larkActionValueRanking, Name: "自然语言·库存金额排行"}, nil
 	case "movements":
 		return larkCommand{Action: larkActionMovements, Name: "自然语言·查流水", Keyword: result.Keyword}, nil
 	case "today_changes":
@@ -176,11 +203,26 @@ func deepSeekResultCommand(content string) (larkCommand, error) {
 			return larkCommand{}, errDeepSeekIntent
 		}
 		return larkCommand{Action: larkActionTodayChanges, Name: "自然语言·今日变动"}, nil
-	case "today_sales_ranking":
+	case "analytics":
 		if result.Keyword != "" {
 			return larkCommand{}, errDeepSeekIntent
 		}
-		return larkCommand{Action: larkActionTodaySalesRanking, Name: "自然语言·今日销售排行"}, nil
+		plan, err := normalizeLarkAnalyticsPlan(larkAnalyticsPlan{
+			Metric:          result.Metric,
+			GroupBy:         result.GroupBy,
+			MovementType:    result.MovementType,
+			TimeRange:       result.TimeRange,
+			Days:            result.Days,
+			Sort:            result.Sort,
+			Limit:           result.Limit,
+			ProductKeyword:  result.ProductKeyword,
+			ShopKeyword:     result.ShopKeyword,
+			OperatorKeyword: result.OperatorKeyword,
+		})
+		if err != nil {
+			return larkCommand{}, errDeepSeekIntent
+		}
+		return larkCommand{Action: larkActionAnalytics, Name: "自然语言·统计查询", Analytics: &plan}, nil
 	case "help":
 		if result.Keyword != "" {
 			return larkCommand{}, errDeepSeekIntent
