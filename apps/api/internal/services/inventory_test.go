@@ -110,17 +110,25 @@ func Test_InventoryService_records_inbound_sale_and_adjustment(t *testing.T) {
 	service := InventoryService{DB: db}
 
 	// When
-	if err := service.CreateInbound(InboundInput{ProductID: product.ID, ShopID: &shop.ID, Quantity: 10, OperatorID: operator.ID}); err != nil {
+	inboundChange, err := service.CreateInbound(InboundInput{ProductID: product.ID, ShopID: &shop.ID, Quantity: 10, OperatorID: operator.ID})
+	if err != nil {
 		t.Fatalf("CreateInbound() error = %v", err)
 	}
-	if err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 4, OperatorID: operator.ID}); err != nil {
+	saleChange, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 4, OperatorID: operator.ID})
+	if err != nil {
 		t.Fatalf("CreateSalesOutbound() error = %v", err)
 	}
-	if err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: -2, Reason: "stocktake", OperatorID: operator.ID}); err != nil {
+	adjustmentChange, err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: -2, Reason: "stocktake", OperatorID: operator.ID})
+	if err != nil {
 		t.Fatalf("CreateAdjustment() error = %v", err)
 	}
 
 	// Then
+	if inboundChange.QuantityBefore != 0 || inboundChange.QuantityAfter != 10 ||
+		saleChange.QuantityBefore != 10 || saleChange.QuantityAfter != 6 ||
+		adjustmentChange.QuantityBefore != 6 || adjustmentChange.QuantityAfter != 4 {
+		t.Fatalf("inventory changes = %+v / %+v / %+v", inboundChange, saleChange, adjustmentChange)
+	}
 	var snapshot models.InventorySnapshot
 	if err := db.First(&snapshot, "product_id = ?", product.ID).Error; err != nil {
 		t.Fatalf("load snapshot: %v", err)
@@ -159,13 +167,13 @@ func Test_InventoryService_allows_zero_product_prices_for_all_operations(t *test
 		t.Fatalf("create shop: %v", err)
 	}
 	service := InventoryService{DB: db}
-	if err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 3, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 3, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("CreateInbound() error = %v", err)
 	}
-	if err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 1, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 1, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("CreateSalesOutbound() error = %v", err)
 	}
-	if err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: -1, Reason: "盘点", OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: -1, Reason: "盘点", OperatorID: operator.ID}); err != nil {
 		t.Fatalf("CreateAdjustment() error = %v", err)
 	}
 	var movements []models.StockMovement
@@ -203,13 +211,16 @@ func Test_InventoryService_rejects_all_writes_for_archived_product(t *testing.T)
 		run  func() error
 	}{
 		{name: "inbound", run: func() error {
-			return service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 1, OperatorID: operator.ID})
+			_, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 1, OperatorID: operator.ID})
+			return err
 		}},
 		{name: "outbound", run: func() error {
-			return service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 1, OperatorID: operator.ID})
+			_, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 1, OperatorID: operator.ID})
+			return err
 		}},
 		{name: "adjustment", run: func() error {
-			return service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: 1, Reason: "test", OperatorID: operator.ID})
+			_, err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: 1, Reason: "test", OperatorID: operator.ID})
+			return err
 		}},
 	}
 	for _, operation := range operations {
@@ -249,14 +260,14 @@ func Test_InventoryService_reprices_stock_and_movements_after_product_price_chan
 		t.Fatalf("create shop: %v", err)
 	}
 	service := InventoryService{DB: db}
-	if err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 5, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 5, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("CreateInbound() error = %v", err)
 	}
 	if err := db.Model(&product).Updates(map[string]any{"default_purchase_cents": 125, "default_sale_cents": 250}).Error; err != nil {
 		t.Fatalf("change product prices: %v", err)
 	}
 
-	if err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("CreateSalesOutbound() error = %v", err)
 	}
 
@@ -301,7 +312,7 @@ func Test_InventoryService_updates_latest_inbound_sale_and_adjustment(t *testing
 		}
 	}
 	service := InventoryService{DB: db}
-	if err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 10, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 10, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("create inbound: %v", err)
 	}
 	if err := db.Model(&product).Update("default_purchase_cents", 110).Error; err != nil {
@@ -339,7 +350,7 @@ func Test_InventoryService_updates_latest_inbound_sale_and_adjustment(t *testing
 		t.Fatalf("preview impact = %+v, saved impact = %+v", preview.Impact, updatedResult.Impact)
 	}
 
-	if err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 4, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 4, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("create sale: %v", err)
 	}
 	if err := db.Model(&product).Update("default_sale_cents", 300).Error; err != nil {
@@ -366,7 +377,7 @@ func Test_InventoryService_updates_latest_inbound_sale_and_adjustment(t *testing
 		t.Fatalf("sale impact = %+v, want qty/value 7/770", saleResult.Impact)
 	}
 
-	if err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: -2, Reason: "盘点", OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: -2, Reason: "盘点", OperatorID: operator.ID}); err != nil {
 		t.Fatalf("create adjustment: %v", err)
 	}
 	adjustment := latestTestMovement(t, db, product.ID)
@@ -429,11 +440,11 @@ func Test_InventoryService_rejects_stale_and_archived_numeric_movement_updates(t
 		t.Fatalf("create operator: %v", err)
 	}
 	service := InventoryService{DB: db}
-	if err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 10, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 10, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("create inbound: %v", err)
 	}
 	inbound := latestTestMovement(t, db, product.ID)
-	if err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: -1, Reason: "盘点", OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateAdjustment(AdjustmentInput{ProductID: product.ID, QuantityDelta: -1, Reason: "盘点", OperatorID: operator.ID}); err != nil {
 		t.Fatalf("create adjustment: %v", err)
 	}
 	quantity := int64(11)
@@ -491,10 +502,10 @@ func Test_InventoryService_rolls_back_rejected_or_unaudited_movement_update(t *t
 		}
 	}
 	service := InventoryService{DB: db}
-	if err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 10, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 10, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("create inbound: %v", err)
 	}
-	if err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, OperatorID: operator.ID}); err != nil {
+	if _, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("create sale: %v", err)
 	}
 	sale := latestTestMovement(t, db, product.ID)
@@ -513,6 +524,28 @@ func Test_InventoryService_rolls_back_rejected_or_unaudited_movement_update(t *t
 		t.Fatal("update without audit table succeeded, want rollback")
 	}
 	assertMovementState(t, db, product.ID, sale.ID, 8, 800, sale.Revision, sale.QuantityDelta)
+}
+
+func Test_InventoryService_returns_empty_change_when_write_fails(t *testing.T) {
+	db := newInventoryTestDB(t)
+	product := models.Product{Name: "No Stock", Code: "NO-STOCK", Enabled: true}
+	operator := models.User{Name: "Admin", Email: "no-stock@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
+	shop := models.Shop{Name: "No Stock Shop", Enabled: true}
+	for _, value := range []any{&product, &operator, &shop} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatalf("seed %T: %v", value, err)
+		}
+	}
+
+	change, err := (InventoryService{DB: db}).CreateSalesOutbound(OutboundInput{
+		ProductID: product.ID, ShopID: shop.ID, Quantity: 1, OperatorID: operator.ID,
+	})
+	if !errors.Is(err, ErrInsufficientStock) {
+		t.Fatalf("error = %v, want %v", err, ErrInsufficientStock)
+	}
+	if change.Product.ID != uuid.Nil || change.Movement.ID != uuid.Nil || change.QuantityBefore != 0 || change.QuantityAfter != 0 {
+		t.Fatalf("failed change = %+v, want zero value", change)
+	}
 }
 
 func latestTestMovement(t *testing.T, db *gorm.DB, productID uuid.UUID) models.StockMovement {

@@ -41,6 +41,16 @@ Self-hosted lightweight inventory admin system.
 
 The Compose stack runs PostgreSQL, the Go API, the Next.js web app, and Nginx. Nginx routes `/api` to the API, `/uploads` to the shared uploads volume, and all other paths to the web app. Product image uploads under `/uploads/*` remain publicly readable.
 
+## Feishu/Lark Inventory Bot
+
+The optional self-built app bot sends successful inbound, sales outbound, and inventory adjustment notifications to one fixed group. In that group, mention the bot with `查库存 <名称或编码>`, `查商品 <名称或编码>`, `低库存`, or `帮助`.
+
+1. Create an enterprise self-built app, enable its bot, and add these permissions: `im:message:send_as_bot`, `im:message.group_at_msg:readonly`, and `im:resource`.
+2. Subscribe to `im.message.receive_v1`, select long-connection event delivery, publish the app, and add the bot to the inventory group.
+3. Set `LARK_APP_ID`, `LARK_APP_SECRET`, and that group's `LARK_CHAT_ID` in `.env`, then restart the API. All three must be set together.
+
+No public callback route or Nginx change is needed. Leave all three variables empty to disable the integration or roll it back.
+
 ## Restore
 
 Run from the project root:

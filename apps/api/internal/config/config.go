@@ -11,8 +11,9 @@ import (
 const minAuthSecretBytes = 32
 
 var (
-	ErrMissingDatabaseURL = errors.New("DATABASE_URL is required")
-	ErrAuthSecretTooShort = errors.New("AUTH_SECRET must be at least 32 bytes")
+	ErrMissingDatabaseURL   = errors.New("DATABASE_URL is required")
+	ErrAuthSecretTooShort   = errors.New("AUTH_SECRET must be at least 32 bytes")
+	ErrIncompleteLarkConfig = errors.New("LARK_APP_ID, LARK_APP_SECRET, and LARK_CHAT_ID must be configured together")
 )
 
 type Config struct {
@@ -34,6 +35,9 @@ type Config struct {
 	InitialAdminEmail       string
 	InitialAdminPassword    string
 	SessionCookieSecure     bool
+	LarkAppID               string
+	LarkAppSecret           string
+	LarkChatID              string
 }
 
 func Load() (Config, error) {
@@ -62,6 +66,19 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	larkAppID := envString("LARK_APP_ID", "")
+	larkAppSecret := envString("LARK_APP_SECRET", "")
+	larkChatID := envString("LARK_CHAT_ID", "")
+	larkValues := 0
+	for _, value := range []string{larkAppID, larkAppSecret, larkChatID} {
+		if value != "" {
+			larkValues++
+		}
+	}
+	if larkValues != 0 && larkValues != 3 {
+		return Config{}, ErrIncompleteLarkConfig
+	}
+
 	cfg := Config{
 		APIAddr:                 envString("API_ADDR", ":8080"),
 		DatabaseURL:             databaseURL,
@@ -81,6 +98,9 @@ func Load() (Config, error) {
 		InitialAdminEmail:       envString("INITIAL_ADMIN_EMAIL", ""),
 		InitialAdminPassword:    envString("INITIAL_ADMIN_PASSWORD", ""),
 		SessionCookieSecure:     sessionCookieSecure,
+		LarkAppID:               larkAppID,
+		LarkAppSecret:           larkAppSecret,
+		LarkChatID:              larkChatID,
 	}
 
 	if len([]byte(cfg.AuthSecret)) < minAuthSecretBytes {
@@ -88,6 +108,10 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c Config) LarkEnabled() bool {
+	return c.LarkAppID != "" && c.LarkAppSecret != "" && c.LarkChatID != ""
 }
 
 func envString(key string, fallback string) string {

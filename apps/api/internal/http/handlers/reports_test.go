@@ -62,10 +62,10 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 		t.Fatalf("create shop: %v", err)
 	}
 	service := services.InventoryService{DB: db}
-	if err := service.CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 5, OperatorID: user.ID}); err != nil {
+	if _, err := service.CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 5, OperatorID: user.ID}); err != nil {
 		t.Fatalf("create inbound: %v", err)
 	}
-	if err := service.CreateSalesOutbound(services.OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, OperatorID: user.ID}); err != nil {
+	if _, err := service.CreateSalesOutbound(services.OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, OperatorID: user.ID}); err != nil {
 		t.Fatalf("create sale: %v", err)
 	}
 	createdAt := time.Now().UTC().Add(-time.Hour)

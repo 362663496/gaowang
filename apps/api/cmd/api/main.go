@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 
@@ -44,6 +45,14 @@ func main() {
 		slog.Error("bootstrap admin", slog.Any("err", err))
 		os.Exit(1)
 	}
+
+	larkContext, cancelLark := context.WithCancel(context.Background())
+	defer cancelLark()
+	go func() {
+		if err := services.RunLarkBot(larkContext, cfg, database); err != nil {
+			slog.Error("run lark bot", slog.Any("err", err))
+		}
+	}()
 
 	router := apihttp.NewRouter(cfg, database)
 	if err := router.Run(cfg.APIAddr); err != nil {

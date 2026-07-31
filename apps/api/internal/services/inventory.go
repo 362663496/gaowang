@@ -50,6 +50,13 @@ type AdjustmentInput struct {
 	OperatorID    uuid.UUID
 }
 
+type InventoryChange struct {
+	Product        models.Product
+	Movement       models.StockMovement
+	QuantityBefore int64
+	QuantityAfter  int64
+}
+
 type MovementUpdateInput struct {
 	MovementID       uuid.UUID
 	ExpectedRevision int64
@@ -288,8 +295,9 @@ func applyAdjustment(snapshot *models.InventorySnapshot, quantityDelta int64, re
 	}, nil
 }
 
-func (s InventoryService) CreateInbound(input InboundInput) error {
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+func (s InventoryService) CreateInbound(input InboundInput) (InventoryChange, error) {
+	var change InventoryChange
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		product, err := lockActiveProduct(tx, input.ProductID)
 		if err != nil {
 			return err
@@ -298,6 +306,7 @@ func (s InventoryService) CreateInbound(input InboundInput) error {
 		if err != nil {
 			return err
 		}
+		quantityBefore := snapshot.Quantity
 		movement, err := applyInbound(&snapshot, input.Quantity, product.DefaultPurchaseCents)
 		if err != nil {
 			return err
@@ -308,12 +317,21 @@ func (s InventoryService) CreateInbound(input InboundInput) error {
 		movement.ProductID = input.ProductID
 		movement.ShopID = input.ShopID
 		movement.OperatorID = input.OperatorID
-		return tx.Create(&movement).Error
+		if err := tx.Create(&movement).Error; err != nil {
+			return err
+		}
+		change = InventoryChange{Product: product, Movement: movement, QuantityBefore: quantityBefore, QuantityAfter: snapshot.Quantity}
+		return nil
 	})
+	if err != nil {
+		return InventoryChange{}, err
+	}
+	return change, nil
 }
 
-func (s InventoryService) CreateSalesOutbound(input OutboundInput) error {
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+func (s InventoryService) CreateSalesOutbound(input OutboundInput) (InventoryChange, error) {
+	var change InventoryChange
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		product, err := lockActiveProduct(tx, input.ProductID)
 		if err != nil {
 			return err
@@ -322,6 +340,7 @@ func (s InventoryService) CreateSalesOutbound(input OutboundInput) error {
 		if err != nil {
 			return err
 		}
+		quantityBefore := snapshot.Quantity
 		movement, err := applySalesOutbound(&snapshot, input.Quantity, product.DefaultPurchaseCents, product.DefaultSaleCents)
 		if err != nil {
 			return err
@@ -332,12 +351,21 @@ func (s InventoryService) CreateSalesOutbound(input OutboundInput) error {
 		movement.ProductID = input.ProductID
 		movement.ShopID = &input.ShopID
 		movement.OperatorID = input.OperatorID
-		return tx.Create(&movement).Error
+		if err := tx.Create(&movement).Error; err != nil {
+			return err
+		}
+		change = InventoryChange{Product: product, Movement: movement, QuantityBefore: quantityBefore, QuantityAfter: snapshot.Quantity}
+		return nil
 	})
+	if err != nil {
+		return InventoryChange{}, err
+	}
+	return change, nil
 }
 
-func (s InventoryService) CreateAdjustment(input AdjustmentInput) error {
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+func (s InventoryService) CreateAdjustment(input AdjustmentInput) (InventoryChange, error) {
+	var change InventoryChange
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		product, err := lockActiveProduct(tx, input.ProductID)
 		if err != nil {
 			return err
@@ -346,6 +374,7 @@ func (s InventoryService) CreateAdjustment(input AdjustmentInput) error {
 		if err != nil {
 			return err
 		}
+		quantityBefore := snapshot.Quantity
 		movement, err := applyAdjustment(&snapshot, input.QuantityDelta, input.Reason, product.DefaultPurchaseCents)
 		if err != nil {
 			return err
@@ -355,8 +384,16 @@ func (s InventoryService) CreateAdjustment(input AdjustmentInput) error {
 		}
 		movement.ProductID = input.ProductID
 		movement.OperatorID = input.OperatorID
-		return tx.Create(&movement).Error
+		if err := tx.Create(&movement).Error; err != nil {
+			return err
+		}
+		change = InventoryChange{Product: product, Movement: movement, QuantityBefore: quantityBefore, QuantityAfter: snapshot.Quantity}
+		return nil
 	})
+	if err != nil {
+		return InventoryChange{}, err
+	}
+	return change, nil
 }
 
 func (s InventoryService) PreviewMovementUpdate(input MovementUpdateInput) (MovementEditResult, error) {

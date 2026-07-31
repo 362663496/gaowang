@@ -28,7 +28,7 @@ func Test_MovementRoutes_preview_update_and_mark_latest(t *testing.T) {
 		}
 	}
 	service := services.InventoryService{DB: db}
-	if err := service.CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 5, OperatorID: admin.ID}); err != nil {
+	if _, err := service.CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 5, OperatorID: admin.ID}); err != nil {
 		t.Fatalf("create inbound: %v", err)
 	}
 	var inbound models.StockMovement
@@ -87,7 +87,7 @@ func Test_MovementRoutes_preview_update_and_mark_latest(t *testing.T) {
 		t.Fatalf("strict request status/body = %d %s", strict.Code, strict.Body.String())
 	}
 
-	if err := service.CreateAdjustment(services.AdjustmentInput{ProductID: product.ID, QuantityDelta: -1, Reason: "盘点", OperatorID: admin.ID}); err != nil {
+	if _, err := service.CreateAdjustment(services.AdjustmentInput{ProductID: product.ID, QuantityDelta: -1, Reason: "盘点", OperatorID: admin.ID}); err != nil {
 		t.Fatalf("create newer movement: %v", err)
 	}
 	list = doJSON(t, router, http.MethodGet, "/api/v1/stock-movements", token, nil)
@@ -116,7 +116,7 @@ func Test_MovementUpdateRoutes_require_independent_permission(t *testing.T) {
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatalf("create product: %v", err)
 	}
-	if err := (services.InventoryService{DB: db}).CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 1, OperatorID: staff.ID}); err != nil {
+	if _, err := (services.InventoryService{DB: db}).CreateInbound(services.InboundInput{ProductID: product.ID, Quantity: 1, OperatorID: staff.ID}); err != nil {
 		t.Fatalf("create inbound: %v", err)
 	}
 	var movement models.StockMovement

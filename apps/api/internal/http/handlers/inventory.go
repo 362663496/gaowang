@@ -16,8 +16,9 @@ import (
 )
 
 type InventoryHandler struct {
-	DB  *gorm.DB
-	Cfg config.Config
+	DB   *gorm.DB
+	Cfg  config.Config
+	Lark *services.LarkNotifier
 }
 
 type inboundRequest struct {
@@ -126,7 +127,7 @@ func (h InventoryHandler) CreateInbound(c *gin.Context) {
 		}
 		shopID = &parsedShopID
 	}
-	err := services.InventoryService{DB: h.DB}.CreateInbound(services.InboundInput{
+	change, err := services.InventoryService{DB: h.DB}.CreateInbound(services.InboundInput{
 		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, OperatorID: currentUserID(c),
 	})
 	if writeStockResult(c, err) {
@@ -135,6 +136,7 @@ func (h InventoryHandler) CreateInbound(c *gin.Context) {
 			metadata["shop_id"] = shopID.String()
 		}
 		recordAudit(c, h.DB, "inventory.inbound", "product", productID.String(), metadata)
+		h.Lark.Enqueue(change)
 	}
 }
 
@@ -151,11 +153,12 @@ func (h InventoryHandler) CreateSalesOutbound(c *gin.Context) {
 	if !ok {
 		return
 	}
-	err := services.InventoryService{DB: h.DB}.CreateSalesOutbound(services.OutboundInput{
+	change, err := services.InventoryService{DB: h.DB}.CreateSalesOutbound(services.OutboundInput{
 		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, OperatorID: currentUserID(c),
 	})
 	if writeStockResult(c, err) {
 		recordAudit(c, h.DB, "inventory.sales_outbound", "product", productID.String(), map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10), "shop_id": shopID.String()})
+		h.Lark.Enqueue(change)
 	}
 }
 
@@ -168,11 +171,12 @@ func (h InventoryHandler) CreateAdjustment(c *gin.Context) {
 	if !ok {
 		return
 	}
-	err := services.InventoryService{DB: h.DB}.CreateAdjustment(services.AdjustmentInput{
+	change, err := services.InventoryService{DB: h.DB}.CreateAdjustment(services.AdjustmentInput{
 		ProductID: productID, QuantityDelta: req.QuantityDelta, Reason: req.Reason, OperatorID: currentUserID(c),
 	})
 	if writeStockResult(c, err) {
 		recordAudit(c, h.DB, "inventory.adjustment", "product", productID.String(), map[string]string{"quantity_delta": strconv.FormatInt(req.QuantityDelta, 10), "reason": req.Reason})
+		h.Lark.Enqueue(change)
 	}
 }
 

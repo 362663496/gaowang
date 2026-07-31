@@ -11,6 +11,7 @@ These guides describe the Go API in `apps/api` as it exists today: Gin handlers,
 | [Error Handling](./error-handling.md) | Service errors and the JSON API error contract |
 | [HTTP Contracts](./http-contracts.md) | Paginated collections and multipart product updates |
 | [Logging Guidelines](./logging-guidelines.md) | Startup logs, request logs, and persistent audit events |
+| [Feishu Inventory Integration](./lark-integration.md) | Fixed-group bot events, notifications, configuration, and failure isolation |
 | [Quality Guidelines](./quality-guidelines.md) | Formatting, tests, and review checks |
 
 ## Pre-Development Checklist

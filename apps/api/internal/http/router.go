@@ -34,7 +34,7 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 	authHandler := handlers.AuthHandler{DB: database, Cfg: cfg}
 	productHandler := handlers.ProductHandler{DB: database, Cfg: cfg}
 	shopHandler := handlers.ShopHandler{DB: database}
-	inventoryHandler := handlers.InventoryHandler{DB: database, Cfg: cfg}
+	inventoryHandler := handlers.InventoryHandler{DB: database, Cfg: cfg, Lark: services.NewLarkNotifier(cfg, database)}
 	movementHandler := handlers.MovementHandler{DB: database}
 	reportHandler := handlers.ReportHandler{DB: database}
 	userHandler := handlers.UserHandler{DB: database}
