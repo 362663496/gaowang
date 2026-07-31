@@ -38,6 +38,8 @@ type Config struct {
 	LarkAppID               string
 	LarkAppSecret           string
 	LarkChatID              string
+	DeepSeekAPIKey          string
+	DeepSeekModel           string
 }
 
 func Load() (Config, error) {
@@ -101,6 +103,8 @@ func Load() (Config, error) {
 		LarkAppID:               larkAppID,
 		LarkAppSecret:           larkAppSecret,
 		LarkChatID:              larkChatID,
+		DeepSeekAPIKey:          envString("DEEPSEEK_API_KEY", ""),
+		DeepSeekModel:           envString("DEEPSEEK_MODEL", "deepseek-v4-flash"),
 	}
 
 	if len([]byte(cfg.AuthSecret)) < minAuthSecretBytes {

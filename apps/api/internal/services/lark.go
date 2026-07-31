@@ -31,10 +31,14 @@ const (
 	larkResultLimit     = 5
 	larkKeywordMaxRunes = 100
 
-	larkActionInventory = "lark.query_inventory"
-	larkActionProduct   = "lark.query_product"
-	larkActionLowStock  = "lark.query_low_stock"
-	larkActionHelp      = "lark.help"
+	larkActionInventory    = "lark.query_inventory"
+	larkActionProduct      = "lark.query_product"
+	larkActionLowStock     = "lark.query_low_stock"
+	larkActionSummary      = "lark.query_summary"
+	larkActionMovements    = "lark.query_movements"
+	larkActionTodayChanges = "lark.query_today_changes"
+	larkActionHelp         = "lark.help"
+	larkActionUnknown      = "lark.unknown"
 )
 
 var larkLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
@@ -101,9 +105,10 @@ func (n *LarkNotifier) notify(ctx context.Context, change InventoryChange) {
 }
 
 type larkBot struct {
-	db        *gorm.DB
-	jobs      chan larktypes.NormalizedMessage
-	messenger *larkMessenger
+	db           *gorm.DB
+	jobs         chan larktypes.NormalizedMessage
+	messenger    *larkMessenger
+	intentParser *deepSeekIntentParser
 }
 
 func RunLarkBot(ctx context.Context, cfg config.Config, db *gorm.DB) error {
@@ -124,9 +129,10 @@ func RunLarkBot(ctx context.Context, cfg config.Config, db *gorm.DB) error {
 		larktypes.WithSafetyConfig(channelCfg.Safety),
 	)
 	bot := &larkBot{
-		db:        db,
-		jobs:      make(chan larktypes.NormalizedMessage, larkQueueSize),
-		messenger: newLarkMessenger(client, cfg.UploadDir, cfg.LarkChatID),
+		db:           db,
+		jobs:         make(chan larktypes.NormalizedMessage, larkQueueSize),
+		messenger:    newLarkMessenger(client, cfg.UploadDir, cfg.LarkChatID),
+		intentParser: newDeepSeekIntentParser(cfg.DeepSeekAPIKey, cfg.DeepSeekModel),
 	}
 	go bot.run(ctx)
 	channel.OnMessage(func(_ context.Context, message *larktypes.NormalizedMessage) error {
@@ -187,12 +193,7 @@ func parseLarkCommand(message larktypes.NormalizedMessage) larkCommand {
 	if message.RawContentType != "text" {
 		return larkCommand{Action: larkActionHelp, Name: "帮助"}
 	}
-	content := message.Content
-	for _, mention := range message.Mentions {
-		if mention.IsBot && mention.Key != "" {
-			content = strings.ReplaceAll(content, mention.Key, "")
-		}
-	}
+	content := larkMessageText(message)
 	parts := strings.Fields(strings.TrimSpace(content))
 	if len(parts) == 0 {
 		return larkCommand{Action: larkActionHelp, Name: "帮助"}
@@ -210,47 +211,118 @@ func parseLarkCommand(message larktypes.NormalizedMessage) larkCommand {
 			return larkCommand{Action: larkActionInventory, Name: name, Keyword: keyword}
 		}
 	case "查商品":
-		if keyword != "" {
-			return larkCommand{Action: larkActionProduct, Name: name, Keyword: keyword}
-		}
+		return larkCommand{Action: larkActionProduct, Name: name, Keyword: keyword}
 	case "低库存":
 		if keyword == "" {
 			return larkCommand{Action: larkActionLowStock, Name: name}
+		}
+	case "库存概览":
+		if keyword == "" {
+			return larkCommand{Action: larkActionSummary, Name: name}
+		}
+	case "查流水":
+		return larkCommand{Action: larkActionMovements, Name: name, Keyword: keyword}
+	case "今日变动":
+		if keyword == "" {
+			return larkCommand{Action: larkActionTodayChanges, Name: name}
 		}
 	case "帮助":
 		if keyword == "" {
 			return larkCommand{Action: larkActionHelp, Name: name}
 		}
 	}
-	return larkCommand{Action: larkActionHelp, Name: name, Keyword: keyword}
+	if name == "查库存" || name == "低库存" || name == "库存概览" || name == "今日变动" || name == "帮助" {
+		return larkCommand{Action: larkActionHelp, Name: name, Keyword: keyword}
+	}
+	return larkCommand{Action: larkActionUnknown, Name: "自然语言"}
+}
+
+func larkMessageText(message larktypes.NormalizedMessage) string {
+	content := message.Content
+	for _, mention := range message.Mentions {
+		if mention.IsBot && mention.Key != "" {
+			content = strings.ReplaceAll(content, mention.Key, "")
+		}
+	}
+	return strings.TrimSpace(content)
+}
+
+func (b *larkBot) resolveCommand(ctx context.Context, message larktypes.NormalizedMessage) (larkCommand, error) {
+	command := parseLarkCommand(message)
+	if command.Action != larkActionUnknown {
+		return command, nil
+	}
+	if b.intentParser == nil {
+		return larkCommand{}, errDeepSeekIntent
+	}
+	return b.intentParser.Parse(ctx, larkMessageText(message))
 }
 
 func (b *larkBot) handle(ctx context.Context, message larktypes.NormalizedMessage) {
-	command := parseLarkCommand(message)
-	b.recordAudit(message, command)
+	command, resolveErr := b.resolveCommand(ctx, message)
 
 	var (
 		card string
 		err  error
 	)
-	if command.Action == larkActionHelp {
-		card, err = larkHelpCard()
+	if resolveErr != nil {
+		card, err = larkAIUnavailableCard()
 	} else {
+		b.recordAudit(message, command)
+	}
+
+	switch {
+	case resolveErr != nil:
+	case command.Action == larkActionHelp:
+		card, err = larkHelpCard()
+	case command.Action == larkActionProduct:
+		card, err = larkProductMigrationCard()
+	case command.Action == larkActionInventory || command.Action == larkActionLowStock:
 		rows, more, queryErr := queryLarkProducts(b.db, command)
 		if queryErr != nil {
 			slog.Warn("query inventory from lark", slog.Any("err", queryErr), slog.String("message_id", message.MessageID))
 			card, err = larkSimpleCard("查询失败", "red", "库存查询暂时失败，请稍后重试。")
 		} else {
-			imageKey := ""
-			if len(rows) == 1 {
-				imageKey = b.messenger.imageKey(ctx, rows[0].ImagePath)
+			paths := make([]string, len(rows))
+			for index := range rows {
+				paths[index] = rows[index].ImagePath
 			}
-			card, err = larkQueryCard(command, rows, more, imageKey)
+			card, err = larkQueryCard(command, rows, more, b.messenger.resolveImageKeys(ctx, paths))
 		}
+	case command.Action == larkActionSummary:
+		var summary larkInventorySummary
+		summary, err = queryLarkInventorySummary(b.db)
+		if err == nil {
+			card, err = larkInventorySummaryCard(summary)
+		}
+	case command.Action == larkActionMovements:
+		var movements []models.StockMovement
+		var more bool
+		movements, more, err = queryLarkMovements(b.db, command.Keyword)
+		if err == nil {
+			paths := make([]string, len(movements))
+			for index := range movements {
+				paths[index] = movements[index].Product.ImagePath
+			}
+			card, err = larkMovementsCard(movements, more, b.messenger.resolveImageKeys(ctx, paths))
+		}
+	case command.Action == larkActionTodayChanges:
+		var changes larkTodayChanges
+		changes, err = queryLarkTodayChanges(b.db, time.Now())
+		if err == nil {
+			card, err = larkTodayChangesCard(changes)
+		}
+	case command.Action == larkActionUnknown:
+		card, err = larkUnknownCard()
+	default:
+		card, err = larkHelpCard()
 	}
 	if err != nil {
-		slog.Warn("build lark query reply", slog.Any("err", err), slog.String("message_id", message.MessageID))
-		return
+		slog.Warn("handle lark query", slog.Any("err", err), slog.String("message_id", message.MessageID))
+		card, err = larkSimpleCard("查询失败", "red", "库存查询暂时失败，请稍后重试。")
+		if err != nil {
+			return
+		}
 	}
 	if err := b.messenger.sendCard(ctx, card, message.MessageID); err != nil {
 		slog.Warn("reply to lark query", slog.Any("err", err), slog.String("message_id", message.MessageID))
@@ -286,14 +358,10 @@ type larkProductRow struct {
 func queryLarkProducts(db *gorm.DB, command larkCommand) ([]larkProductRow, bool, error) {
 	query := db.Table("products").
 		Select("products.*, COALESCE(inventory_snapshots.quantity, 0) AS quantity").
+		Joins("LEFT JOIN inventory_snapshots ON inventory_snapshots.product_id = products.id").
 		Where("products.archived_at IS NULL")
-	if command.Action == larkActionProduct {
-		query = query.Joins("LEFT JOIN inventory_snapshots ON inventory_snapshots.product_id = products.id")
-	} else {
-		query = query.Joins("JOIN inventory_snapshots ON inventory_snapshots.product_id = products.id")
-	}
 	if command.Action == larkActionLowStock {
-		query = query.Where("products.low_stock_threshold > 0 AND inventory_snapshots.quantity <= products.low_stock_threshold")
+		query = query.Where("products.low_stock_threshold > 0 AND COALESCE(inventory_snapshots.quantity, 0) <= products.low_stock_threshold")
 	}
 	if command.Keyword != "" {
 		like := "%" + strings.ToLower(command.Keyword) + "%"
@@ -315,6 +383,85 @@ func queryLarkProducts(db *gorm.DB, command larkCommand) ([]larkProductRow, bool
 		rows = rows[:larkResultLimit]
 	}
 	return rows, more, nil
+}
+
+type larkInventorySummary struct {
+	ProductCount   int64 `gorm:"column:product_count"`
+	Quantity       int64 `gorm:"column:quantity"`
+	ValueCents     int64 `gorm:"column:value_cents"`
+	LowStockCount  int64 `gorm:"column:low_stock_count"`
+	ZeroStockCount int64 `gorm:"column:zero_stock_count"`
+}
+
+func queryLarkInventorySummary(db *gorm.DB) (larkInventorySummary, error) {
+	var summary larkInventorySummary
+	err := db.Table("products").
+		Select(`COUNT(products.id) AS product_count,
+			COALESCE(SUM(COALESCE(inventory_snapshots.quantity, 0)), 0) AS quantity,
+			COALESCE(SUM(COALESCE(inventory_snapshots.quantity, 0) * products.default_purchase_cents), 0) AS value_cents,
+			COALESCE(SUM(CASE WHEN products.low_stock_threshold > 0 AND COALESCE(inventory_snapshots.quantity, 0) <= products.low_stock_threshold THEN 1 ELSE 0 END), 0) AS low_stock_count,
+			COALESCE(SUM(CASE WHEN COALESCE(inventory_snapshots.quantity, 0) = 0 THEN 1 ELSE 0 END), 0) AS zero_stock_count`).
+		Joins("LEFT JOIN inventory_snapshots ON inventory_snapshots.product_id = products.id").
+		Where("products.archived_at IS NULL").
+		Scan(&summary).Error
+	return summary, err
+}
+
+func queryLarkMovements(db *gorm.DB, keyword string) ([]models.StockMovement, bool, error) {
+	query := db.Model(&models.StockMovement{}).
+		Select("stock_movements.*").
+		Joins("JOIN products ON products.id = stock_movements.product_id").
+		Preload("Product").
+		Preload("Shop").
+		Preload("Operator")
+	if keyword != "" {
+		like := "%" + strings.ToLower(keyword) + "%"
+		query = query.Where("LOWER(products.name) LIKE ? OR LOWER(products.code) LIKE ?", like, like)
+	}
+
+	var movements []models.StockMovement
+	err := query.
+		Order("stock_movements.created_at DESC").
+		Order("stock_movements.id DESC").
+		Limit(larkResultLimit + 1).
+		Find(&movements).Error
+	if err != nil {
+		return nil, false, err
+	}
+	more := len(movements) > larkResultLimit
+	if more {
+		movements = movements[:larkResultLimit]
+	}
+	return movements, more, nil
+}
+
+type larkTodayChanges struct {
+	InboundCount       int64 `gorm:"column:inbound_count"`
+	InboundQuantity    int64 `gorm:"column:inbound_quantity"`
+	OutboundCount      int64 `gorm:"column:outbound_count"`
+	OutboundQuantity   int64 `gorm:"column:outbound_quantity"`
+	AdjustmentCount    int64 `gorm:"column:adjustment_count"`
+	AdjustmentQuantity int64 `gorm:"column:adjustment_quantity"`
+}
+
+func queryLarkTodayChanges(db *gorm.DB, now time.Time) (larkTodayChanges, error) {
+	localNow := now.In(larkLocation)
+	start := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, larkLocation)
+	end := start.AddDate(0, 0, 1)
+	var changes larkTodayChanges
+	err := db.Model(&models.StockMovement{}).
+		Select(`COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END), 0) AS inbound_count,
+			COALESCE(SUM(CASE WHEN type = ? THEN quantity_delta ELSE 0 END), 0) AS inbound_quantity,
+			COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END), 0) AS outbound_count,
+			COALESCE(SUM(CASE WHEN type = ? THEN -quantity_delta ELSE 0 END), 0) AS outbound_quantity,
+			COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END), 0) AS adjustment_count,
+			COALESCE(SUM(CASE WHEN type = ? THEN quantity_delta ELSE 0 END), 0) AS adjustment_quantity`,
+			models.MovementTypeInbound, models.MovementTypeInbound,
+			models.MovementTypeSalesOutbound, models.MovementTypeSalesOutbound,
+			models.MovementTypeAdjustment, models.MovementTypeAdjustment).
+		Where("created_at >= ? AND created_at < ?", start.UTC(), end.UTC()).
+		Scan(&changes).Error
+	return changes, err
 }
 
 type larkMessenger struct {
@@ -362,6 +509,14 @@ func (m *larkMessenger) imageKey(ctx context.Context, imagePath string) string {
 	return key
 }
 
+func (m *larkMessenger) resolveImageKeys(ctx context.Context, imagePaths []string) []string {
+	keys := make([]string, len(imagePaths))
+	for index, imagePath := range imagePaths {
+		keys[index] = m.imageKey(ctx, imagePath)
+	}
+	return keys
+}
+
 func (m *larkMessenger) sendCard(ctx context.Context, card string, replyMessageID string) error {
 	requestUUID := uuid.NewString()
 	_, err := larkoutbound.Retry(ctx, func(_ int) (interface{}, error) {
@@ -405,116 +560,252 @@ func (m *larkMessenger) sendCard(ctx context.Context, card string, replyMessageI
 	return err
 }
 
-func larkQueryCard(command larkCommand, rows []larkProductRow, more bool, imageKey string) (string, error) {
+func larkQueryCard(command larkCommand, rows []larkProductRow, more bool, imageKeys []string) (string, error) {
 	if len(rows) == 0 {
 		return larkSimpleCard("查询结果", "grey", "没有找到匹配的商品。")
 	}
 	if len(rows) == 1 {
-		return larkProductCard(rows[0], imageKey)
+		return larkProductCard(rows[0], larkImageKeyAt(imageKeys, 0))
 	}
 
-	var content strings.Builder
+	elements := make([]larkcard.MessageCardElement, 0, len(rows)*2)
 	for index, row := range rows {
 		if index > 0 {
-			content.WriteString("\n---\n")
+			elements = append(elements, larkcard.NewMessageCardHr().Build())
 		}
-		fmt.Fprintf(&content, "**%s**  `%s`\n库存：%d　状态：%s",
-			escapeLarkMarkdown(row.Name), escapeLarkMarkdown(row.Code), row.Quantity, larkProductStatus(row))
+		element, err := larkProductElement(row, larkImageKeyAt(imageKeys, index))
+		if err != nil {
+			return "", err
+		}
+		elements = append(elements, element)
 	}
 	if more {
-		content.WriteString("\n\n结果超过 5 条，请缩小关键词。")
+		elements = append(elements, larkcard.NewMessageCardMarkdown().Content("结果超过 5 条，请缩小关键词。").Build())
 	}
 	title := "库存查询"
-	if command.Action == larkActionProduct {
-		title = "商品查询"
-	} else if command.Action == larkActionLowStock {
+	template := "blue"
+	if command.Action == larkActionLowStock {
 		title = "低库存商品"
+		template = "orange"
 	}
-	return larkSimpleCard(title, "blue", content.String())
+	return larkCard(title, template, elements)
 }
 
 func larkProductCard(row larkProductRow, imageKey string) (string, error) {
-	value, err := CurrentInventoryValue(models.InventorySnapshot{Product: row.Product, Quantity: row.Quantity})
+	element, err := larkProductElement(row, imageKey)
 	if err != nil {
 		return "", err
 	}
-	content := fmt.Sprintf(
-		"**商品名称：** %s\n**编码：** `%s`\n**当前数量：** %d\n**当前采购价：** %s\n**商品售价：** %s\n**库存金额：** %s\n**状态：** %s",
-		escapeLarkMarkdown(row.Name),
-		escapeLarkMarkdown(row.Code),
-		row.Quantity,
-		larkMoney(row.DefaultPurchaseCents),
-		larkMoney(row.DefaultSaleCents),
-		larkMoney(value),
-		larkProductStatus(row),
+	template := "blue"
+	if larkLowStock(row.Product, row.Quantity) {
+		template = "orange"
+	}
+	return larkCard("商品详情", template, []larkcard.MessageCardElement{element})
+}
+
+func larkProductElement(row larkProductRow, imageKey string) (larkcard.MessageCardElement, error) {
+	value, err := CurrentInventoryValue(models.InventorySnapshot{Product: row.Product, Quantity: row.Quantity})
+	if err != nil {
+		return nil, err
+	}
+	fields := []*larkcard.MessageCardField{
+		larkField(fmt.Sprintf("**当前数量**\n**%d**", row.Quantity)),
+		larkField(fmt.Sprintf("**状态**\n**%s**", larkProductStatus(row))),
+		larkField(fmt.Sprintf("**当前采购价**\n%s", larkMoney(row.DefaultPurchaseCents))),
+		larkField(fmt.Sprintf("**商品售价**\n%s", larkMoney(row.DefaultSaleCents))),
+		larkField(fmt.Sprintf("**库存金额**\n**%s**", larkMoney(value))),
+	}
+	return larkDetailElement(
+		fmt.Sprintf("**%s**\n编码：`%s`", escapeLarkMarkdown(row.Name), escapeLarkMarkdown(row.Code)),
+		fields,
+		imageKey,
+		row.Name,
+	), nil
+}
+
+func larkInventorySummaryCard(summary larkInventorySummary) (string, error) {
+	template := "blue"
+	if summary.LowStockCount > 0 {
+		template = "orange"
+	}
+	element := larkDetailElement("**当前库存概览**", []*larkcard.MessageCardField{
+		larkField(fmt.Sprintf("**商品数**\n**%d**", summary.ProductCount)),
+		larkField(fmt.Sprintf("**库存总数量**\n**%d**", summary.Quantity)),
+		larkField(fmt.Sprintf("**库存金额**\n**%s**", larkMoney(summary.ValueCents))),
+		larkField(fmt.Sprintf("**低库存**\n⚠️ **%d**", summary.LowStockCount)),
+		larkField(fmt.Sprintf("**无库存**\n**%d**", summary.ZeroStockCount)),
+	}, "", "")
+	return larkCard("库存概览", template, []larkcard.MessageCardElement{element})
+}
+
+func larkMovementsCard(movements []models.StockMovement, more bool, imageKeys []string) (string, error) {
+	if len(movements) == 0 {
+		return larkSimpleCard("最近流水", "grey", "没有找到匹配的流水记录。")
+	}
+	elements := make([]larkcard.MessageCardElement, 0, len(movements)*2)
+	for index, movement := range movements {
+		if index > 0 {
+			elements = append(elements, larkcard.NewMessageCardHr().Build())
+		}
+		elements = append(elements, larkMovementElement(movement, larkImageKeyAt(imageKeys, index)))
+	}
+	if more {
+		elements = append(elements, larkcard.NewMessageCardMarkdown().Content("结果超过 5 条，请缩小关键词。").Build())
+	}
+	return larkCard("最近流水", "blue", elements)
+}
+
+func larkMovementElement(movement models.StockMovement, imageKey string) larkcard.MessageCardElement {
+	operation := "库存调整"
+	symbol := "↕️"
+	switch movement.Type {
+	case models.MovementTypeInbound:
+		operation = "入库"
+		symbol = "⬆️"
+	case models.MovementTypeSalesOutbound:
+		operation = "销售出库"
+		symbol = "⬇️"
+	}
+	shop := "-"
+	if movement.Shop != nil {
+		shop = escapeLarkMarkdown(movement.Shop.Name)
+	}
+	fields := []*larkcard.MessageCardField{
+		larkField("**类型**\n" + operation),
+		larkField(fmt.Sprintf("**数量变化**\n%s **%s**", symbol, larkSignedQuantity(movement.QuantityDelta))),
+		larkField("**操作人**\n" + escapeLarkMarkdown(movement.Operator.Name)),
+		larkField("**店铺**\n" + shop),
+		larkField("**时间**\n" + movement.CreatedAt.In(larkLocation).Format("2006-01-02 15:04:05")),
+	}
+	if movement.Reason != "" {
+		fields = append(fields, larkField("**原因**\n"+escapeLarkMarkdown(movement.Reason)))
+	}
+	return larkDetailElement(
+		fmt.Sprintf("**%s**\n编码：`%s`", escapeLarkMarkdown(movement.Product.Name), escapeLarkMarkdown(movement.Product.Code)),
+		fields,
+		imageKey,
+		movement.Product.Name,
 	)
-	return larkCard("商品详情", "blue", content, imageKey)
+}
+
+func larkTodayChangesCard(changes larkTodayChanges) (string, error) {
+	element := larkDetailElement("**上海时间 · 今日库存变动**", []*larkcard.MessageCardField{
+		larkField(fmt.Sprintf("**⬆️ 入库**\n%d 笔 / **%d 件**", changes.InboundCount, changes.InboundQuantity)),
+		larkField(fmt.Sprintf("**⬇️ 销售出库**\n%d 笔 / **%d 件**", changes.OutboundCount, changes.OutboundQuantity)),
+		larkField(fmt.Sprintf("**↕️ 库存调整**\n%d 笔 / **%s 件**", changes.AdjustmentCount, larkSignedQuantity(changes.AdjustmentQuantity))),
+	}, "", "")
+	return larkCard("今日变动", "blue", []larkcard.MessageCardElement{element})
 }
 
 func larkInventoryChangeCard(change InventoryChange, imageKey string) (string, error) {
 	operation := "库存调整"
+	template := "blue"
+	symbol := "↕️"
 	switch change.Movement.Type {
 	case models.MovementTypeInbound:
 		operation = "入库"
+		template = "green"
+		symbol = "⬆️"
 	case models.MovementTypeSalesOutbound:
 		operation = "销售出库"
+		template = "red"
+		symbol = "⬇️"
 	}
-	template := "blue"
-	statusLine := ""
+	status := ""
 	beforeLow := larkLowStock(change.Product, change.QuantityBefore)
 	afterLow := larkLowStock(change.Product, change.QuantityAfter)
 	if !beforeLow && afterLow {
 		template = "orange"
-		statusLine = "\n**库存状态：** 已进入低库存"
+		status = "⚠️ **已进入低库存**"
 	} else if beforeLow && !afterLow {
 		template = "green"
-		statusLine = "\n**库存状态：** 已恢复正常"
+		status = "✅ **已恢复正常**"
 	}
 
-	content := fmt.Sprintf(
-		"**操作：** %s\n**商品：** %s\n**编码：** `%s`\n**数量变化：** %s\n**库存结果：** %d → %d\n**操作人：** %s\n**时间：** %s%s",
-		operation,
-		escapeLarkMarkdown(change.Product.Name),
-		escapeLarkMarkdown(change.Product.Code),
-		larkSignedQuantity(change.Movement.QuantityDelta),
-		change.QuantityBefore,
-		change.QuantityAfter,
-		escapeLarkMarkdown(change.Movement.Operator.Name),
-		change.Movement.CreatedAt.In(larkLocation).Format("2006-01-02 15:04:05"),
-		statusLine,
-	)
+	fields := []*larkcard.MessageCardField{
+		larkField(fmt.Sprintf("**数量变化**\n%s **%s**", symbol, larkSignedQuantity(change.Movement.QuantityDelta))),
+		larkField(fmt.Sprintf("**库存结果**\n**%d → %d**", change.QuantityBefore, change.QuantityAfter)),
+	}
+	if status != "" {
+		fields = append(fields, larkField("**库存状态**\n"+status))
+	}
+	fields = append(fields, larkField("**操作人**\n"+escapeLarkMarkdown(change.Movement.Operator.Name)))
 	if change.Movement.Shop != nil {
-		content += "\n**店铺：** " + escapeLarkMarkdown(change.Movement.Shop.Name)
+		fields = append(fields, larkField("**店铺**\n"+escapeLarkMarkdown(change.Movement.Shop.Name)))
 	}
+	fields = append(fields, larkField("**时间**\n"+change.Movement.CreatedAt.In(larkLocation).Format("2006-01-02 15:04:05")))
 	if change.Movement.Reason != "" {
-		content += "\n**原因：** " + escapeLarkMarkdown(change.Movement.Reason)
+		fields = append(fields, larkField("**原因**\n"+escapeLarkMarkdown(change.Movement.Reason)))
 	}
-	return larkCard("库存操作 · "+operation, template, content, imageKey)
+	element := larkDetailElement(
+		fmt.Sprintf("**%s**\n编码：`%s`", escapeLarkMarkdown(change.Product.Name), escapeLarkMarkdown(change.Product.Code)),
+		fields,
+		imageKey,
+		change.Product.Name,
+	)
+	return larkCard("库存操作 · "+operation, template, []larkcard.MessageCardElement{element})
 }
 
 func larkHelpCard() (string, error) {
 	return larkSimpleCard("库存机器人帮助", "blue",
-		"请在固定库存群内 @机器人 后发送：\n"+
+		"固定命令：\n"+
 			"- `查库存 <名称或编码>`\n"+
-			"- `查商品 <名称或编码>`\n"+
 			"- `低库存`\n"+
-			"- `帮助`")
+			"- `库存概览`\n"+
+			"- `查流水 [名称或编码]`\n"+
+			"- `今日变动`\n"+
+			"- `帮助`\n\n"+
+			"也可以直接问：`绿茶还有多少？`、`哪些商品需要补货？`、`今天出了多少货？`")
+}
+
+func larkProductMigrationCard() (string, error) {
+	return larkSimpleCard("命令已合并", "blue", "`查商品` 已合并到 `查库存`，请发送：`查库存 <名称或编码>`。")
+}
+
+func larkAIUnavailableCard() (string, error) {
+	return larkSimpleCard("智能识别暂时不可用", "orange",
+		"请使用固定命令：`查库存 <名称或编码>`、`低库存`、`库存概览`、`查流水 [名称或编码]`、`今日变动` 或 `帮助`。")
+}
+
+func larkUnknownCard() (string, error) {
+	return larkSimpleCard("只支持库存查询", "grey", "我可以查询商品库存、低库存、库存概览、最近流水和今日变动。发送 `帮助` 查看用法。")
+}
+
+func larkField(content string) *larkcard.MessageCardField {
+	return larkcard.NewMessageCardField().
+		IsShort(true).
+		Text(larkcard.NewMessageCardLarkMd().Content(content).Build()).
+		Build()
+}
+
+func larkDetailElement(content string, fields []*larkcard.MessageCardField, imageKey string, imageAlt string) larkcard.MessageCardElement {
+	div := larkcard.NewMessageCardDiv().
+		Text(larkcard.NewMessageCardLarkMd().Content(content).Build()).
+		Fields(fields)
+	if imageKey != "" {
+		div.Extra(larkcard.NewMessageCardEmbedImage().
+			ImgKey(imageKey).
+			Alt(larkcard.NewMessageCardPlainText().Content(imageAlt).Build()).
+			Preview(true).
+			Build())
+	}
+	return div.Build()
+}
+
+func larkImageKeyAt(imageKeys []string, index int) string {
+	if index < len(imageKeys) {
+		return imageKeys[index]
+	}
+	return ""
 }
 
 func larkSimpleCard(title string, template string, content string) (string, error) {
-	return larkCard(title, template, content, "")
+	return larkCard(title, template, []larkcard.MessageCardElement{
+		larkcard.NewMessageCardMarkdown().Content(content).Build(),
+	})
 }
 
-func larkCard(title string, template string, content string, imageKey string) (string, error) {
-	elements := make([]larkcard.MessageCardElement, 0, 2)
-	if imageKey != "" {
-		elements = append(elements, larkcard.NewMessageCardImage().
-			ImgKey(imageKey).
-			Alt(larkcard.NewMessageCardPlainText().Content("商品图片").Build()).
-			Mode(larkcard.MessageCardImageModelFitHorizontal).
-			Build())
-	}
-	elements = append(elements, larkcard.NewMessageCardMarkdown().Content(content).Build())
+func larkCard(title string, template string, elements []larkcard.MessageCardElement) (string, error) {
 	return larkcard.NewMessageCard().
 		Config(larkcard.NewMessageCardConfig().WideScreenMode(true).Build()).
 		Header(larkcard.NewMessageCardHeader().
@@ -529,13 +820,13 @@ func larkCard(title string, template string, content string, imageKey string) (s
 func larkProductStatus(row larkProductRow) string {
 	status := make([]string, 0, 2)
 	if !row.Enabled {
-		status = append(status, "已禁用")
+		status = append(status, "⏸️ 已禁用")
 	}
 	if larkLowStock(row.Product, row.Quantity) {
-		status = append(status, "低库存")
+		status = append(status, "⚠️ 低库存")
 	}
 	if len(status) == 0 {
-		return "正常"
+		return "✅ 正常"
 	}
 	return strings.Join(status, " · ")
 }
