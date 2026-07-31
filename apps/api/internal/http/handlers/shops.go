@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"gaowang/apps/api/internal/models"
@@ -43,4 +44,32 @@ func (h ShopHandler) Create(c *gin.Context) {
 	}
 	recordAudit(c, h.DB, "shop.create", "shop", shop.ID.String(), map[string]string{"name": shop.Name})
 	c.JSON(http.StatusCreated, gin.H{"item": shop})
+}
+
+func (h ShopHandler) Update(c *gin.Context) {
+	id, ok := parseUUID(c, c.Param("id"), "id")
+	if !ok {
+		return
+	}
+	var req createShopRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	var shop models.Shop
+	if err := h.DB.First(&shop, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(c, http.StatusNotFound, "SHOP_NOT_FOUND", "店铺不存在")
+			return
+		}
+		writeError(c, http.StatusInternalServerError, "SHOP_LOOKUP_FAILED", "查询店铺失败")
+		return
+	}
+	shop.Name = req.Name
+	shop.Note = req.Note
+	if err := h.DB.Save(&shop).Error; err != nil {
+		writeError(c, http.StatusBadRequest, "SHOP_UPDATE_FAILED", "店铺名称已存在或数据无效")
+		return
+	}
+	recordAudit(c, h.DB, "shop.update", "shop", shop.ID.String(), map[string]string{"name": shop.Name})
+	c.JSON(http.StatusOK, gin.H{"item": shop})
 }

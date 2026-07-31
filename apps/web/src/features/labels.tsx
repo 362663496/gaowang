@@ -45,6 +45,7 @@ const auditActions: Record<string, string> = {
   "product.delete": "删除商品",
   "product.archive": "归档商品",
   "shop.create": "新增店铺",
+  "shop.update": "修改店铺",
   "inventory.inbound": "入库",
   "inventory.sales_outbound": "销售出库",
   "inventory.adjustment": "库存调整",

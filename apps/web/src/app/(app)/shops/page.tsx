@@ -1,13 +1,13 @@
 "use client";
 
-import { PlusOutlined } from "@ant-design/icons";
+import { EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Flex, Form, Input, Modal, Statistic, Table, Tag, type TableProps } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { initialPagination, tablePagination } from "@/features/pagination";
 import type { Paginated, Shop } from "@/features/types";
 import { useSession } from "@/components/layout/session-context";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, apiPut } from "@/lib/api";
 import { formatDateTime, formatQuantity } from "@/lib/format";
 
 type ShopValues = { name: string; note?: string };
@@ -16,10 +16,12 @@ export default function ShopsPage() {
   const { message } = App.useApp();
   const { hasPermission } = useSession();
   const canCreate = hasPermission("shop.create");
+  const canUpdate = hasPermission("shop.update");
   const [shops, setShops] = useState<Shop[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Shop | null>(null);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(initialPagination);
 
@@ -48,6 +50,14 @@ export default function ShopsPage() {
     { title: "状态", dataIndex: "Enabled", width: 100, render: (value: boolean) => <Tag color={value ? "green" : "red"}>{value ? "启用" : "禁用"}</Tag> },
     { title: "创建时间", dataIndex: "CreatedAt", width: 180, render: (value: string) => <span className="muted">{formatDateTime(value)}</span> },
   ];
+  if (canUpdate) {
+    columns.push({
+      title: "操作",
+      fixed: "right",
+      width: 100,
+      render: (_, shop) => <Button icon={<EditOutlined />} size="small" onClick={() => setEditing(shop)}>修改</Button>,
+    });
+  }
 
   return (
     <Flex gap={20} vertical>
@@ -65,13 +75,13 @@ export default function ShopsPage() {
           loading={loading}
           pagination={tablePagination(pagination, setPage)}
           rowKey="ID"
-          scroll={{ x: 700 }}
+          scroll={{ x: 800 }}
         />
       </Card>
       <Modal destroyOnHidden footer={null} open={open} title="新增店铺" onCancel={() => setOpen(false)}>
         <ShopForm
           onCancel={() => setOpen(false)}
-          onCreated={() => {
+          onSaved={() => {
             setOpen(false);
             message.success("店铺已创建");
             if (page === 1) void load();
@@ -79,11 +89,25 @@ export default function ShopsPage() {
           }}
         />
       </Modal>
+      <Modal destroyOnHidden footer={null} open={editing !== null} title="修改店铺" onCancel={() => setEditing(null)}>
+        {editing ? (
+          <ShopForm
+            key={editing.ID}
+            shop={editing}
+            onCancel={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null);
+              message.success("店铺已修改");
+              void load();
+            }}
+          />
+        ) : null}
+      </Modal>
     </Flex>
   );
 }
 
-function ShopForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
+function ShopForm({ shop, onCancel, onSaved }: { shop?: Shop; onCancel: () => void; onSaved: () => void }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -91,8 +115,10 @@ function ShopForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: ()
     setSaving(true);
     setError("");
     try {
-      await apiPost<{ item: Shop }>("/shops", { name: values.name, note: values.note ?? "" });
-      onCreated();
+      const payload = { name: values.name, note: values.note ?? "" };
+      if (shop) await apiPut<{ item: Shop }>(`/shops/${shop.ID}`, payload);
+      else await apiPost<{ item: Shop }>("/shops", payload);
+      onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
     } finally {
@@ -101,7 +127,12 @@ function ShopForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: ()
   }
 
   return (
-    <Form<ShopValues> layout="vertical" requiredMark={false} onFinish={submit}>
+    <Form<ShopValues>
+      initialValues={{ name: shop?.Name, note: shop?.Note }}
+      layout="vertical"
+      requiredMark={false}
+      onFinish={submit}
+    >
       {error ? <Alert message={error} showIcon style={{ marginBottom: 16 }} type="error" /> : null}
       <Form.Item label="店铺名称" name="name" rules={[{ required: true, message: "请输入店铺名称" }]}><Input /></Form.Item>
       <Form.Item label="备注" name="note"><Input.TextArea maxLength={500} rows={3} showCount /></Form.Item>

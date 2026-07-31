@@ -56,6 +56,7 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 
 	group.GET("/shops", RequirePermission(services.PermShopRead), shopHandler.List)
 	group.POST("/shops", RequirePermission(services.PermShopCreate), shopHandler.Create)
+	group.PUT("/shops/:id", RequirePermission(services.PermShopUpdate), shopHandler.Update)
 
 	group.GET("/inventory", RequirePermission(services.PermInventoryRead), inventoryHandler.ListCurrent)
 	group.GET("/inventory/export", RequirePermission(services.PermInventoryRead), inventoryHandler.ExportCurrent)

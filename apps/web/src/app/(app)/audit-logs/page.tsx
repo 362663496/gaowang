@@ -22,6 +22,7 @@ const actionOptions = [
   "product.delete",
   "product.archive",
   "shop.create",
+  "shop.update",
   "inventory.inbound",
   "inventory.sales_outbound",
   "inventory.adjustment",

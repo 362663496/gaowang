@@ -17,6 +17,7 @@ const (
 	PermProductDelete          = "product.delete"
 	PermShopRead               = "shop.read"
 	PermShopCreate             = "shop.create"
+	PermShopUpdate             = "shop.update"
 	PermInventoryRead          = "inventory.read"
 	PermInventoryInbound       = "inventory.inbound"
 	PermInventorySalesOutbound = "inventory.sales_outbound"
@@ -55,6 +56,7 @@ var permissionCatalog = []PermissionDef{
 	{Key: PermProductDelete, Module: "product", ModuleLabel: "商品", ActionLabel: "删除", StaffAssignable: true, Requires: []string{PermProductRead}},
 	{Key: PermShopRead, Module: "shop", ModuleLabel: "店铺", ActionLabel: "查看", StaffAssignable: true},
 	{Key: PermShopCreate, Module: "shop", ModuleLabel: "店铺", ActionLabel: "新增", StaffAssignable: true, Requires: []string{PermShopRead}},
+	{Key: PermShopUpdate, Module: "shop", ModuleLabel: "店铺", ActionLabel: "编辑", StaffAssignable: true, Requires: []string{PermShopRead}},
 	{Key: PermInventoryRead, Module: "inventory", ModuleLabel: "库存", ActionLabel: "查看", StaffAssignable: true, Requires: []string{PermProductRead}},
 	{Key: PermInventoryInbound, Module: "inventory", ModuleLabel: "库存", ActionLabel: "入库", StaffAssignable: true, Requires: []string{PermInventoryRead, PermShopRead}},
 	{Key: PermInventorySalesOutbound, Module: "inventory", ModuleLabel: "库存", ActionLabel: "销售出库", StaffAssignable: true, Requires: []string{PermInventoryRead, PermShopRead}},
