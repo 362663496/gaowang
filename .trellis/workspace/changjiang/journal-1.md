@@ -206,3 +206,36 @@ Completed database-backed cookie sessions, explicit route permissions, staff per
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: 飞书库存机器人上线验证
+
+**Date**: 2026-07-31
+**Task**: 飞书库存机器人上线验证
+**Branch**: `master`
+
+### Summary
+
+完成飞书库存机器人集成并部署；将生产 LARK_CHAT_ID 更新为新库存群，重启长连接后验证主动消息成功，帮助、查商品、查库存共 4 条群内 @ 消息已入站并写入审计，API 健康且无回复错误。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8639318` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
