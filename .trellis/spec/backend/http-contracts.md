@@ -9,9 +9,9 @@ Use this contract for authentication, permission changes, or any new protected r
 ### 2. Signatures
 
 - Session APIs: `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`, `POST /auth/password`.
-- Permission APIs: `GET /permissions`, `PUT /permissions` with `{"permissions":["product.read"]}`.
+- Permission APIs: `GET /permissions`, `PUT /permissions` with `{"user_id":"UUID","permissions":["product.read"]}`.
 - Middleware: `RequireSameOrigin()`, `RequireAuth(db, cfg)`, `RequirePermission(permission)`.
-- Database: `sessions(token_hash, user_id, expires_at, created_at)` and `staff_permissions(permission, created_at)`.
+- Database: `sessions(token_hash, user_id, expires_at, created_at)` and `user_permissions(user_id, permission, created_at)` with composite primary key `(user_id, permission)`.
 - Read-only exports reuse their domain read permission; for example, `GET /inventory/export` requires `inventory.read`.
 
 ### 3. Contracts
@@ -19,7 +19,10 @@ Use this contract for authentication, permission changes, or any new protected r
 - Login creates a 32-byte random token and returns `{"user":{"id","name","email","role"},"permissions":[]}`. Only the `HMAC-SHA256(AUTH_SECRET, token)` hex hash is stored.
 - The browser receives `gaowang_session` with `Path=/api/v1`, `HttpOnly`, `SameSite=Strict`, and a fixed seven-day lifetime. Set `Secure` from `SESSION_COOKIE_SECURE`, TLS, or trusted `X-Forwarded-Proto: https`.
 - Requests use `credentials: "include"`; identity, role, and token are never stored in browser-readable storage or supplied through development headers.
-- `admin` receives the full code catalog. `staff` receives only known assignable rows from `staff_permissions`; permission writes validate keys and expand dependencies before replacing rows and recording `permission.updated` in the same transaction.
+- `admin` receives the full code catalog. Each `staff` receives only its own known assignable rows from `user_permissions`; a newly created employee starts with zero business permissions.
+- `GET /permissions` returns `{"catalog":[],"users":[{"id","name","email","permissions":[]}]}` for all staff, ordered by name, email, then ID; administrators are omitted. `PUT /permissions` validates the target employee, expands dependencies, and replaces only that user's rows.
+- Permission writes record `permission.updated` in the same transaction with the target user ID as `resource_id` and metadata fields `user_id`, `before`, and `after`.
+- On first upgrade, `db.Migrate` copies the retained legacy `staff_permissions` grants to every existing employee and records a `settings` migration marker in one transaction. The legacy table remains for application rollback; the marker prevents restarts from overwriting later user-specific changes.
 - Account routes require only a valid session. Every business route declares one `RequirePermission(...)` at registration; handlers do not branch on roles.
 - `POST`, `PUT`, `PATCH`, and `DELETE` require an `Origin` matching the direct or forwarded scheme and host.
 - The web client treats `401` as session expiry and redirects to `/login`; `403` emits `gaowang:permissions-refresh`, preserves the session, and surfaces the original error.
@@ -34,13 +37,15 @@ Use this contract for authentication, permission changes, or any new protected r
 | Missing business permission | `403 FORBIDDEN`, keep the session |
 | Missing, malformed, or cross-origin mutation `Origin` | `403 FORBIDDEN` before the handler |
 | Unknown or admin-only key in a staff permission update | `400 VALIDATION` |
+| Invalid/missing target user ID or target is an admin | `400 VALIDATION` |
+| Target user does not exist | `404 USER_NOT_FOUND` |
 | Session or permission persistence failure | `500 INTERNAL` without token, password, or secret details |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a staff user with `inventory.read` can list and export inventory; a user without it gets `403` from both routes.
-- Base: a zero-permission staff user can still call `/auth/me`, change a password, and log out.
-- Bad: a new business route is mounted behind authentication only, or a client handles `403` by logging the user out.
+- Good: employee A with `inventory.read` can list and export inventory while employee B without it gets `403`; changing A never changes B.
+- Base: a new zero-permission employee can still call `/auth/me`, change a password, and log out; administrators remain full-access and absent from the editable list.
+- Bad: reading every grant without `WHERE user_id = ?`, clearing all rows during one employee update, or rerunning legacy copy after the migration marker would collapse authorization back into shared state.
 
 ### 6. Tests Required
 
@@ -48,7 +53,8 @@ Use this contract for authentication, permission changes, or any new protected r
 - Assert forged development headers, expired/deleted sessions, and disabled users do not authenticate.
 - Assert same-origin mutation handling, current-session logout, and all-session password revocation.
 - Enumerate registered routes with a valid zero-permission staff session; every non-public, non-account business route must return `403`.
-- Assert permission dependency closure, unknown/admin-only rejection, atomic audit metadata, and independent destructive permissions.
+- Assert per-user isolation through `/auth/me` and a business route, dependency closure, unknown/admin-only rejection, invalid target handling, atomic target/before/after audit metadata, and independent destructive permissions.
+- Assert legacy grants copy to existing employees once, exclude administrators, survive retry, do not overwrite later adjustments, and do not apply to employees created after migration.
 - Assert the web API client sends Cookie credentials, redirects only on `401`, refreshes permissions on `403`, and applies the same behavior to downloads.
 
 ### 7. Wrong vs Correct
@@ -59,6 +65,14 @@ group.GET("/inventory/export", inventoryHandler.ExportCurrent)
 
 // Correct: route registration is the explicit policy map.
 group.GET("/inventory/export", RequirePermission(services.PermInventoryRead), inventoryHandler.ExportCurrent)
+```
+
+```go
+// Wrong: one employee update deletes every employee's grants.
+tx.Where("1 = 1").Delete(&models.UserPermission{})
+
+// Correct: every read and replacement is scoped to the authenticated/target user.
+tx.Where("user_id = ?", userID).Delete(&models.UserPermission{})
 ```
 
 ## Scenario: Paginated Collection Endpoints

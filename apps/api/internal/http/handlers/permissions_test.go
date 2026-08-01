@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -11,12 +12,16 @@ import (
 	"gaowang/apps/api/internal/models"
 	"gaowang/apps/api/internal/services"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
-func Test_Permissions_admin_can_read_and_update_staff_grants(t *testing.T) {
+func Test_Permissions_admin_can_read_and_update_user_grants(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	db := openHandlerTestDB(t, authModels()...)
+	db := openHandlerTestDB(t, append(authModels(), &models.Product{})...)
 	admin := createTestUser(t, db, "Admin", "admin@example.com", "password123", models.RoleAdmin)
+	staffA := createTestUser(t, db, "Staff A", "a@example.com", "password123", models.RoleStaff)
+	staffB := createTestUser(t, db, "Staff B", "b@example.com", "password123", models.RoleStaff)
+	setUserPermissions(t, db, staffB.ID, services.PermAuditRead)
 	token := createSessionToken(t, db, admin.ID)
 	router := apihttp.NewRouter(testConfig(), db)
 
@@ -24,32 +29,88 @@ func Test_Permissions_admin_can_read_and_update_staff_grants(t *testing.T) {
 	if getResponse.Code != http.StatusOK {
 		t.Fatalf("GET status = %d body=%s", getResponse.Code, getResponse.Body.String())
 	}
+	var listBody struct {
+		Catalog []services.PermissionDef `json:"catalog"`
+		Users   []struct {
+			ID          string   `json:"id"`
+			Name        string   `json:"name"`
+			Permissions []string `json:"permissions"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(getResponse.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("decode GET: %v", err)
+	}
+	if len(listBody.Catalog) == 0 || len(listBody.Users) != 2 {
+		t.Fatalf("permission response = %+v", listBody)
+	}
+	if listBody.Users[0].ID != staffA.ID.String() || listBody.Users[1].ID != staffB.ID.String() || !reflect.DeepEqual(listBody.Users[1].Permissions, []string{services.PermAuditRead}) {
+		t.Fatalf("staff users = %+v", listBody.Users)
+	}
 
 	putResponse := doJSON(t, router, http.MethodPut, "/api/v1/permissions", token, map[string]any{
+		"user_id":     staffA.ID.String(),
 		"permissions": []string{services.PermProductCreate, services.PermProductDelete},
 	})
 	if putResponse.Code != http.StatusOK {
 		t.Fatalf("PUT status = %d body=%s", putResponse.Code, putResponse.Body.String())
 	}
 	var body struct {
-		StaffPermissions []string `json:"staff_permissions"`
+		Permissions []string `json:"permissions"`
 	}
 	if err := json.Unmarshal(putResponse.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	joined := strings.Join(body.StaffPermissions, ",")
-	for _, key := range []string{services.PermProductCreate, services.PermProductDelete, services.PermProductRead} {
-		if !strings.Contains(joined, key) {
-			t.Fatalf("staff permissions missing %s: %v", key, body.StaffPermissions)
+	want := []string{services.PermProductCreate, services.PermProductDelete, services.PermProductRead}
+	if !reflect.DeepEqual(body.Permissions, want) {
+		t.Fatalf("permissions = %v, want %v", body.Permissions, want)
+	}
+	getResponse = doJSON(t, router, http.MethodGet, "/api/v1/permissions", token, nil)
+	listBody.Users = nil
+	if err := json.Unmarshal(getResponse.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("decode permissions after reload: %v", err)
+	}
+	if len(listBody.Users) != 2 || !reflect.DeepEqual(listBody.Users[0].Permissions, want) {
+		t.Fatalf("permissions after reload = %s", getResponse.Body.String())
+	}
+
+	staffAToken := createSessionToken(t, db, staffA.ID)
+	staffBToken := createSessionToken(t, db, staffB.ID)
+	for _, tc := range []struct {
+		name        string
+		token       string
+		permissions []string
+		productCode int
+	}{
+		{name: "staff A", token: staffAToken, permissions: want, productCode: http.StatusOK},
+		{name: "staff B", token: staffBToken, permissions: []string{services.PermAuditRead}, productCode: http.StatusForbidden},
+	} {
+		me := doJSON(t, router, http.MethodGet, "/api/v1/auth/me", tc.token, nil)
+		var authBody struct {
+			Permissions []string `json:"permissions"`
+		}
+		if err := json.Unmarshal(me.Body.Bytes(), &authBody); err != nil || !reflect.DeepEqual(authBody.Permissions, tc.permissions) {
+			t.Fatalf("%s /auth/me = %s, decode error = %v", tc.name, me.Body.String(), err)
+		}
+		products := doJSON(t, router, http.MethodGet, "/api/v1/products", tc.token, nil)
+		if products.Code != tc.productCode {
+			t.Fatalf("%s product status = %d, want %d", tc.name, products.Code, tc.productCode)
 		}
 	}
 
-	var audits int64
-	if err := db.Model(&models.AuditLog{}).Where("action = ?", "permission.updated").Count(&audits).Error; err != nil {
-		t.Fatalf("count audits: %v", err)
+	var audit models.AuditLog
+	if err := db.Where("action = ?", "permission.updated").First(&audit).Error; err != nil {
+		t.Fatalf("load audit: %v", err)
 	}
-	if audits != 1 {
-		t.Fatalf("audit count = %d, want 1", audits)
+	var metadata struct {
+		UserID string   `json:"user_id"`
+		Before []string `json:"before"`
+		After  []string `json:"after"`
+	}
+	if err := json.Unmarshal(audit.Metadata, &metadata); err != nil {
+		t.Fatalf("decode audit metadata: %v", err)
+	}
+	if audit.ResourceID != staffA.ID.String() || metadata.UserID != staffA.ID.String() || len(metadata.Before) != 0 || !reflect.DeepEqual(metadata.After, want) {
+		t.Fatalf("audit = %+v metadata = %+v", audit, metadata)
 	}
 }
 
@@ -57,10 +118,12 @@ func Test_Permissions_reject_unknown_and_admin_only_keys(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := openHandlerTestDB(t, authModels()...)
 	admin := createTestUser(t, db, "Admin", "admin@example.com", "password123", models.RoleAdmin)
+	staff := createTestUser(t, db, "Staff", "staff@example.com", "password123", models.RoleStaff)
 	token := createSessionToken(t, db, admin.ID)
 	router := apihttp.NewRouter(testConfig(), db)
 
 	unknown := doJSON(t, router, http.MethodPut, "/api/v1/permissions", token, map[string]any{
+		"user_id":     staff.ID.String(),
 		"permissions": []string{"nope.read"},
 	})
 	if unknown.Code != http.StatusBadRequest {
@@ -68,10 +131,24 @@ func Test_Permissions_reject_unknown_and_admin_only_keys(t *testing.T) {
 	}
 
 	adminOnly := doJSON(t, router, http.MethodPut, "/api/v1/permissions", token, map[string]any{
+		"user_id":     staff.ID.String(),
 		"permissions": []string{services.PermUserRead},
 	})
 	if adminOnly.Code != http.StatusBadRequest {
 		t.Fatalf("admin-only status = %d body=%s", adminOnly.Code, adminOnly.Body.String())
+	}
+
+	invalidID := doJSON(t, router, http.MethodPut, "/api/v1/permissions", token, map[string]any{"user_id": "bad", "permissions": []string{}})
+	if invalidID.Code != http.StatusBadRequest {
+		t.Fatalf("invalid ID status = %d body=%s", invalidID.Code, invalidID.Body.String())
+	}
+	missing := doJSON(t, router, http.MethodPut, "/api/v1/permissions", token, map[string]any{"user_id": uuid.NewString(), "permissions": []string{}})
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing user status = %d body=%s", missing.Code, missing.Body.String())
+	}
+	adminTarget := doJSON(t, router, http.MethodPut, "/api/v1/permissions", token, map[string]any{"user_id": admin.ID.String(), "permissions": []string{}})
+	if adminTarget.Code != http.StatusBadRequest {
+		t.Fatalf("admin target status = %d body=%s", adminTarget.Code, adminTarget.Body.String())
 	}
 }
 
@@ -121,7 +198,7 @@ func Test_Staff_product_delete_independent_of_create(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := openHandlerTestDB(t, append(authModels(), &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{})...)
 	staff := createTestUser(t, db, "Staff", "staff@example.com", "password123", models.RoleStaff)
-	setStaffPermissions(t, db, services.PermProductCreate, services.PermProductUpdate, services.PermProductToggle)
+	setUserPermissions(t, db, staff.ID, services.PermProductCreate, services.PermProductUpdate, services.PermProductToggle)
 	token := createSessionToken(t, db, staff.ID)
 	product := models.Product{Name: "Tea", Code: "TEA", Enabled: true}
 	if err := db.Create(&product).Error; err != nil {

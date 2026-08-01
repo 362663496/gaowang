@@ -5,10 +5,11 @@ import (
 	"sort"
 
 	"gaowang/apps/api/internal/models"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// Permission keys — keep stable; they are stored in staff_permissions and exposed to the web UI.
+// Permission keys — keep stable; they are stored in user_permissions and exposed to the web UI.
 const (
 	PermProductRead            = "product.read"
 	PermProductCreate          = "product.create"
@@ -156,9 +157,9 @@ func EffectivePermissions(db *gorm.DB, user models.User) ([]string, error) {
 	if user.Role == models.RoleAdmin {
 		return AllPermissionKeys(), nil
 	}
-	var rows []models.StaffPermission
-	if err := db.Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("load staff permissions: %w", err)
+	var rows []models.UserPermission
+	if err := db.Where("user_id = ?", user.ID).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("load user permissions: %w", err)
 	}
 	selected := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
@@ -184,11 +185,11 @@ func HasPermission(set map[string]struct{}, key string) bool {
 	return ok
 }
 
-// ReplaceStaffPermissions atomically replaces all staff grants inside the provided transaction.
-func ReplaceStaffPermissions(tx *gorm.DB, permissions []string) (before []string, after []string, err error) {
-	var existing []models.StaffPermission
-	if err := tx.Find(&existing).Error; err != nil {
-		return nil, nil, fmt.Errorf("load existing staff permissions: %w", err)
+// ReplaceUserPermissions atomically replaces one user's grants inside the provided transaction.
+func ReplaceUserPermissions(tx *gorm.DB, userID uuid.UUID, permissions []string) (before []string, after []string, err error) {
+	var existing []models.UserPermission
+	if err := tx.Where("user_id = ?", userID).Find(&existing).Error; err != nil {
+		return nil, nil, fmt.Errorf("load existing user permissions: %w", err)
 	}
 	beforeSet := make(map[string]struct{}, len(existing))
 	for _, row := range existing {
@@ -205,12 +206,12 @@ func ReplaceStaffPermissions(tx *gorm.DB, permissions []string) (before []string
 		return nil, nil, err
 	}
 
-	if err := tx.Where("1 = 1").Delete(&models.StaffPermission{}).Error; err != nil {
-		return nil, nil, fmt.Errorf("clear staff permissions: %w", err)
+	if err := tx.Where("user_id = ?", userID).Delete(&models.UserPermission{}).Error; err != nil {
+		return nil, nil, fmt.Errorf("clear user permissions: %w", err)
 	}
 	for _, key := range after {
-		if err := tx.Create(&models.StaffPermission{Permission: key}).Error; err != nil {
-			return nil, nil, fmt.Errorf("insert staff permission %s: %w", key, err)
+		if err := tx.Create(&models.UserPermission{UserID: userID, Permission: key}).Error; err != nil {
+			return nil, nil, fmt.Errorf("insert user permission %s: %w", key, err)
 		}
 	}
 	return before, after, nil

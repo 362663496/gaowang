@@ -38,7 +38,7 @@ func openHandlerTestDB(t *testing.T, modelsToMigrate ...any) *gorm.DB {
 }
 
 func authModels() []any {
-	return []any{&models.User{}, &models.Session{}, &models.StaffPermission{}, &models.AuditLog{}}
+	return []any{&models.User{}, &models.Session{}, &models.UserPermission{}, &models.AuditLog{}}
 }
 
 func createTestUser(t *testing.T, db *gorm.DB, name string, email string, password string, role models.Role) models.User {
@@ -109,17 +109,17 @@ func doRaw(t *testing.T, router http.Handler, method string, path string, rawTok
 	return response
 }
 
-func setStaffPermissions(t *testing.T, db *gorm.DB, keys ...string) {
+func setUserPermissions(t *testing.T, db *gorm.DB, userID uuid.UUID, keys ...string) {
 	t.Helper()
-	if err := db.Where("1 = 1").Delete(&models.StaffPermission{}).Error; err != nil {
-		t.Fatalf("clear staff permissions: %v", err)
+	if err := db.Where("user_id = ?", userID).Delete(&models.UserPermission{}).Error; err != nil {
+		t.Fatalf("clear user permissions: %v", err)
 	}
 	expanded, err := services.ExpandPermissionClosure(keys)
 	if err != nil {
 		t.Fatalf("expand permissions: %v", err)
 	}
 	for _, key := range expanded {
-		if err := db.Create(&models.StaffPermission{Permission: key}).Error; err != nil {
+		if err := db.Create(&models.UserPermission{UserID: userID, Permission: key}).Error; err != nil {
 			t.Fatalf("create permission %s: %v", key, err)
 		}
 	}

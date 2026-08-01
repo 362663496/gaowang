@@ -51,7 +51,7 @@ func Test_ExpandPermissionClosure_dedupes(t *testing.T) {
 }
 
 func Test_EffectivePermissions_admin_and_staff(t *testing.T) {
-	db := newServiceTestDB(t, &models.StaffPermission{})
+	db := newServiceTestDB(t, &models.User{}, &models.UserPermission{})
 	adminKeys, err := EffectivePermissions(db, models.User{Role: models.RoleAdmin})
 	if err != nil {
 		t.Fatalf("admin permissions: %v", err)
@@ -60,34 +60,48 @@ func Test_EffectivePermissions_admin_and_staff(t *testing.T) {
 		t.Fatalf("admin key count = %d, want %d", len(adminKeys), len(PermissionCatalog()))
 	}
 
-	if err := db.Create(&models.StaffPermission{Permission: PermProductDelete}).Error; err != nil {
+	staffA := createPermissionTestStaff(t, db, "a@example.com")
+	staffB := createPermissionTestStaff(t, db, "b@example.com")
+	if err := db.Create(&models.UserPermission{UserID: staffA.ID, Permission: PermProductDelete}).Error; err != nil {
 		t.Fatalf("create grant: %v", err)
 	}
 	// Unknown and admin-only rows must be ignored.
-	if err := db.Create(&models.StaffPermission{Permission: "legacy.unknown"}).Error; err != nil {
+	if err := db.Create(&models.UserPermission{UserID: staffA.ID, Permission: "legacy.unknown"}).Error; err != nil {
 		t.Fatalf("create unknown: %v", err)
 	}
-	if err := db.Create(&models.StaffPermission{Permission: PermUserRead}).Error; err != nil {
+	if err := db.Create(&models.UserPermission{UserID: staffA.ID, Permission: PermUserRead}).Error; err != nil {
 		t.Fatalf("create admin-only: %v", err)
 	}
+	if err := db.Create(&models.UserPermission{UserID: staffB.ID, Permission: PermAuditRead}).Error; err != nil {
+		t.Fatalf("create other user grant: %v", err)
+	}
 
-	staffKeys, err := EffectivePermissions(db, models.User{Role: models.RoleStaff})
+	staffKeys, err := EffectivePermissions(db, staffA)
 	if err != nil {
 		t.Fatalf("staff permissions: %v", err)
 	}
 	if !reflect.DeepEqual(staffKeys, []string{PermProductDelete}) {
 		t.Fatalf("staff keys = %v, want only product.delete", staffKeys)
 	}
+	otherKeys, err := EffectivePermissions(db, staffB)
+	if err != nil || !reflect.DeepEqual(otherKeys, []string{PermAuditRead}) {
+		t.Fatalf("other staff keys = %v, err = %v", otherKeys, err)
+	}
 }
 
-func Test_ReplaceStaffPermissions_atomic_replace_and_closure(t *testing.T) {
-	db := newServiceTestDB(t, &models.StaffPermission{}, &models.AuditLog{})
-	if err := db.Create(&models.StaffPermission{Permission: PermShopRead}).Error; err != nil {
+func Test_ReplaceUserPermissions_atomic_replace_closure_and_isolation(t *testing.T) {
+	db := newServiceTestDB(t, &models.User{}, &models.UserPermission{})
+	staffA := createPermissionTestStaff(t, db, "a@example.com")
+	staffB := createPermissionTestStaff(t, db, "b@example.com")
+	if err := db.Create(&models.UserPermission{UserID: staffA.ID, Permission: PermShopRead}).Error; err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if err := db.Create(&models.UserPermission{UserID: staffB.ID, Permission: PermAuditRead}).Error; err != nil {
+		t.Fatalf("seed other user: %v", err)
 	}
 
 	err := db.Transaction(func(tx *gorm.DB) error {
-		before, after, err := ReplaceStaffPermissions(tx, []string{PermProductCreate})
+		before, after, err := ReplaceUserPermissions(tx, staffA.ID, []string{PermProductCreate})
 		if err != nil {
 			return err
 		}
@@ -103,22 +117,27 @@ func Test_ReplaceStaffPermissions_atomic_replace_and_closure(t *testing.T) {
 		t.Fatalf("transaction: %v", err)
 	}
 
-	keys, err := EffectivePermissions(db, models.User{Role: models.RoleStaff})
+	keys, err := EffectivePermissions(db, staffA)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if !reflect.DeepEqual(keys, []string{PermProductCreate, PermProductRead}) {
 		t.Fatalf("keys = %v", keys)
 	}
+	otherKeys, err := EffectivePermissions(db, staffB)
+	if err != nil || !reflect.DeepEqual(otherKeys, []string{PermAuditRead}) {
+		t.Fatalf("other staff keys = %v, err = %v", otherKeys, err)
+	}
 }
 
-func Test_ReplaceStaffPermissions_rolls_back_on_failure(t *testing.T) {
-	db := newServiceTestDB(t, &models.StaffPermission{})
-	if err := db.Create(&models.StaffPermission{Permission: PermAuditRead}).Error; err != nil {
+func Test_ReplaceUserPermissions_rolls_back_on_failure(t *testing.T) {
+	db := newServiceTestDB(t, &models.User{}, &models.UserPermission{})
+	staff := createPermissionTestStaff(t, db, "staff@example.com")
+	if err := db.Create(&models.UserPermission{UserID: staff.ID, Permission: PermAuditRead}).Error; err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	err := db.Transaction(func(tx *gorm.DB) error {
-		_, _, err := ReplaceStaffPermissions(tx, []string{PermProductRead})
+		_, _, err := ReplaceUserPermissions(tx, staff.ID, []string{PermProductRead})
 		if err != nil {
 			return err
 		}
@@ -127,11 +146,20 @@ func Test_ReplaceStaffPermissions_rolls_back_on_failure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected transaction failure")
 	}
-	keys, err := EffectivePermissions(db, models.User{Role: models.RoleStaff})
+	keys, err := EffectivePermissions(db, staff)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if !reflect.DeepEqual(keys, []string{PermAuditRead}) {
 		t.Fatalf("keys after rollback = %v, want [audit.read]", keys)
 	}
+}
+
+func createPermissionTestStaff(t *testing.T, db *gorm.DB, email string) models.User {
+	t.Helper()
+	user := models.User{Name: email, Email: email, PasswordHash: "hash", Role: models.RoleStaff, Enabled: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create staff: %v", err)
+	}
+	return user
 }

@@ -5,6 +5,7 @@
 - Production uses PostgreSQL through GORM (`internal/db/db.go`). Tests commonly use an isolated in-memory SQLite database with a UUID in its DSN.
 - `gorm.Config{SkipDefaultTransaction: true}` is intentional. Ordinary CRUD is direct; atomic workflows must open an explicit transaction.
 - Schema creation currently uses `db.Migrate` and `AutoMigrate`. Add every new persisted model to the centralized list in `internal/db/db.go`; there is no versioned migration directory yet.
+- Compatibility data migrations run after `AutoMigrate` and use a durable `settings` marker written in the same transaction as their data copy. Keep the source table when rollback depends on the old application reading it; never infer completion from the destination table being non-empty.
 - UUID primary keys are assigned by `BeforeCreate` hooks in `internal/models/models.go`.
 
 ## Data Representation
@@ -49,4 +50,5 @@ Runtime settings use the `settings` key/value table. Database values override en
 - Stock updates outside `InventoryService` or outside an explicit transaction.
 - Floating-point money, movement deletion, editing a non-latest movement, or a snapshot-only correction.
 - Adding a model without updating `db.Migrate` and a relevant test database migration.
+- Replaying a compatibility backfill on every startup; it can silently restore values that an administrator intentionally removed after migration.
 - Assuming SQLite proves PostgreSQL-only SQL; keep dialect-specific behavior explicit and exercise production queries when they become critical.

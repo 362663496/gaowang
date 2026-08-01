@@ -123,7 +123,7 @@ func Test_MovementUpdateRoutes_require_independent_permission(t *testing.T) {
 	if err := db.First(&movement, "product_id = ?", product.ID).Error; err != nil {
 		t.Fatalf("load movement: %v", err)
 	}
-	setStaffPermissions(t, db, services.PermMovementRead)
+	setUserPermissions(t, db, staff.ID, services.PermMovementRead)
 	token := createSessionToken(t, db, staff.ID)
 	router := apihttp.NewRouter(testConfig(), db)
 	payload := map[string]any{
@@ -235,7 +235,7 @@ func Test_MovementList_filters_created_at_by_shanghai_day_and_uses_current_produ
 func newMovementTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return openHandlerTestDB(t,
-		&models.User{}, &models.Session{}, &models.StaffPermission{}, &models.Shop{}, &models.Product{},
+		&models.User{}, &models.Session{}, &models.UserPermission{}, &models.Shop{}, &models.Product{},
 		&models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{},
 	)
 }

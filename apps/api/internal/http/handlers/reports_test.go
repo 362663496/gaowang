@@ -216,7 +216,7 @@ func assertShopRankingResponse(t *testing.T, response *httptest.ResponseRecorder
 
 func newReportTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	return openHandlerTestDB(t, &models.User{}, &models.Session{}, &models.StaffPermission{}, &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{})
+	return openHandlerTestDB(t, &models.User{}, &models.Session{}, &models.UserPermission{}, &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{})
 }
 
 func createReportUser(t *testing.T, db *gorm.DB) models.User {

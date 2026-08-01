@@ -23,13 +23,13 @@ func Test_ShopUpdate_persists_fields_records_audit_and_requires_permission(t *te
 	router := apihttp.NewRouter(testConfig(), db)
 	payload := map[string]string{"name": "New Shop", "note": "new note"}
 
-	setStaffPermissions(t, db, services.PermShopRead)
+	setUserPermissions(t, db, staff.ID, services.PermShopRead)
 	denied := doJSON(t, router, http.MethodPut, "/api/v1/shops/"+shop.ID.String(), token, payload)
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("update without permission status = %d, want 403; body = %s", denied.Code, denied.Body.String())
 	}
 
-	setStaffPermissions(t, db, services.PermShopUpdate)
+	setUserPermissions(t, db, staff.ID, services.PermShopUpdate)
 	if list := doJSON(t, router, http.MethodGet, "/api/v1/shops", token, nil); list.Code != http.StatusOK {
 		t.Fatalf("shop.update dependency did not grant read: status = %d body = %s", list.Code, list.Body.String())
 	}

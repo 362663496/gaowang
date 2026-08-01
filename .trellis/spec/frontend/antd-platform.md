@@ -39,6 +39,14 @@ ProductImage(props: {
   preview?: boolean;
   size?: number;
 })
+
+// Permission management edits one employee at a time.
+type PermissionUser = {
+  id: string;
+  name: string;
+  email: string;
+  permissions: string[];
+}
 ```
 
 ## 3. Contracts
@@ -54,6 +62,8 @@ ProductImage(props: {
 - Product `ImagePath` may reference a missing historical file; `ProductImage` switches to a square Ant Design `Avatar` with visible `待补图` text on empty path or `onError`.
 - Stock movement day filtering uses `DatePicker.RangePicker`, sends inclusive `from`/`to` values as `YYYY-MM-DD`, and resets server pagination to page one.
 - Clearing `DatePicker.RangePicker` can pass `null` as its formatted-date argument at runtime; guard it before indexing so clearing the range restores the unfiltered query instead of throwing.
+- Permission management loads `catalog` plus ordered `users`, selects the first employee, and uses one searchable Ant Design `Select` instead of a dynamic user-column matrix. Each user's editable permission array stays with that page-local user record so switching employees preserves the current page draft; saving sends only `user_id` and that employee's permissions.
+- Administrators stay represented by the locked table column and never appear in the employee selector. When `users` is empty, hide the table/save action and render Ant Design `Empty`.
 
 ## 4. Validation & Error Matrix
 
@@ -66,6 +76,8 @@ ProductImage(props: {
 | Image URL empty or load fails | Render square `Avatar` with visible `待补图` |
 | Remote list loading | Keep `Table` mounted with `loading=true` |
 | Remote list fails | Show retryable `Alert`; do not silently empty the table |
+| Permission response has no employees | Show `暂无员工账号`; do not expose a save action without a target |
+| Permission update fails | Keep that employee's draft and show the server message in a retryable `Alert` |
 | Viewport below 992px | Hide `Sider`, expose named menu button, open navigation in `Drawer`, keep tables horizontally scrollable |
 
 ## 5. Good / Base / Bad Cases
@@ -73,6 +85,9 @@ ProductImage(props: {
 - Good: `Table<Product>` receives typed columns, `ProductIdentity`, `rowKey="ID"`, `scroll.x`, and `tablePagination(meta, setPage)`.
 - Base: a bounded dashboard/report table can set `pagination={false}` because it is not a management collection.
 - Bad: a text-only product selector/list item, raw `<table>`, custom next/previous buttons, `window.confirm`, native `datalist`, or a home-grown toast reintroduces inconsistent operation surfaces.
+- Good: switching from employee A to B and back keeps both in-page drafts; saving A sends A's ID and does not mutate B.
+- Base: zero employees renders a clear empty state; one employee is selected automatically.
+- Bad: one checkbox array shared by every employee, one table column per account, or a save request without `user_id` makes the edited target ambiguous.
 
 ## 6. Tests Required
 
@@ -80,6 +95,7 @@ ProductImage(props: {
 - Unit: API client continues to expose the server error message and redirect auth failures.
 - Static gate: lint, strict TypeScript, Vitest, production build, and `npm audit --omit=dev` pass.
 - Browser: verify desktop shell, 500px drawer, all routes, server-paged table navigation, image-grid search/selection, form error persistence, delete conflict persistence, and image-load fallback.
+- Browser: on permissions, verify employee switching, independent drafts, save/reload persistence, error retention, locked admin-only rows, and the zero-employee empty state.
 
 ## 7. Wrong vs Correct
 
@@ -95,4 +111,12 @@ return <table>{rows.map(/* text-only product cells */)}</table>;
 ```tsx
 <ProductCombobox products={products} value={productID} onChange={setProductID} />
 return <Table columns={[{ title: "商品", render: (_, row) => <ProductIdentity product={row.Product} /> }]} />;
+```
+
+```tsx
+// Wrong: the target user is implicit and every employee shares one draft.
+apiPut("/permissions", { permissions: selected });
+
+// Correct: one selector owns the explicit target and save payload.
+apiPut("/permissions", { user_id: selectedUser.id, permissions: selectedUser.permissions });
 ```

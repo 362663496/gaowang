@@ -56,9 +56,21 @@ type Session struct {
 	CreatedAt time.Time
 }
 
-// StaffPermission is one shared staff role grant; unknown keys are ignored at load time.
-type StaffPermission struct {
+// LegacyStaffPermission keeps the retired shared-grant table readable during migration.
+type LegacyStaffPermission struct {
 	Permission string `gorm:"primaryKey;size:64"`
+	CreatedAt  time.Time
+}
+
+func (LegacyStaffPermission) TableName() string {
+	return "staff_permissions"
+}
+
+// UserPermission is one business permission granted to one staff user.
+type UserPermission struct {
+	UserID     uuid.UUID `gorm:"type:uuid;primaryKey"`
+	User       User      `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	Permission string    `gorm:"primaryKey;size:64"`
 	CreatedAt  time.Time
 }
 

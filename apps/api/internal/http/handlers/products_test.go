@@ -276,7 +276,7 @@ func Test_ProductLifecycle_updates_deletes_archives_and_protects_stock(t *testin
 
 func newProductTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	return openHandlerTestDB(t, &models.User{}, &models.Session{}, &models.StaffPermission{}, &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{})
+	return openHandlerTestDB(t, &models.User{}, &models.Session{}, &models.UserPermission{}, &models.Shop{}, &models.Product{}, &models.InventorySnapshot{}, &models.StockMovement{}, &models.AuditLog{})
 }
 
 func productRequest(router http.Handler, token string, method string, path string, body string) *httptest.ResponseRecorder {
