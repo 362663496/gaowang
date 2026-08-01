@@ -178,7 +178,7 @@ func backupMailMessage(cfg MailConfig, filename string, data []byte) ([]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("create attachment: %w", err)
 	}
-	encoder := base64.NewEncoder(base64.StdEncoding, part)
+	encoder := base64.NewEncoder(base64.StdEncoding, &mimeBase64LineWriter{writer: part})
 	if _, err := encoder.Write(data); err != nil {
 		_ = encoder.Close()
 		return nil, fmt.Errorf("encode attachment: %w", err)
@@ -232,4 +232,37 @@ func closeWithError(current error, closer io.Closer) error {
 		return err
 	}
 	return current
+}
+
+const mimeBase64LineLength = 76
+
+type mimeBase64LineWriter struct {
+	writer io.Writer
+	column int
+}
+
+func (w *mimeBase64LineWriter) Write(data []byte) (int, error) {
+	written := 0
+	for len(data) > 0 {
+		if w.column == mimeBase64LineLength {
+			if n, err := io.WriteString(w.writer, "\r\n"); err != nil {
+				return written, err
+			} else if n != 2 {
+				return written, io.ErrShortWrite
+			}
+			w.column = 0
+		}
+		chunk := min(mimeBase64LineLength-w.column, len(data))
+		n, err := w.writer.Write(data[:chunk])
+		written += n
+		w.column += n
+		if err != nil {
+			return written, err
+		}
+		if n != chunk {
+			return written, io.ErrShortWrite
+		}
+		data = data[chunk:]
+	}
+	return written, nil
 }
