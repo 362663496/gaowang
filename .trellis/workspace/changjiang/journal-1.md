@@ -274,3 +274,37 @@ Completed database-backed cookie sessions, explicit route permissions, staff per
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: 按用户管理权限
+
+**Date**: 2026-08-01
+**Task**: 按用户管理权限
+**Branch**: `master`
+
+### Summary
+
+将共享员工权限升级为用户级授权，新增可重试兼容迁移、逐用户权限 API 与员工选择页面；完成鉴权隔离、审计、全量测试、race、构建和规范更新。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9b5b348` | (see git log) |
+| `c14d1eb` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
