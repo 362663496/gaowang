@@ -56,6 +56,8 @@ func Test_DeepSeek_maps_common_inventory_language_to_validated_query_plans(t *te
 			plan: &larkAnalyticsPlan{Metric: larkMetricMovementQuantity, GroupBy: larkGroupNone, MovementType: larkMovementInbound, TimeRange: larkTimeToday, Limit: 1}},
 		{input: "今天出库多少", result: `{"intent":"analytics","metric":"movement_quantity","movement_type":"sales_outbound","time_range":"today"}`, action: larkActionAnalytics,
 			plan: &larkAnalyticsPlan{Metric: larkMetricMovementQuantity, GroupBy: larkGroupNone, MovementType: larkMovementOutbound, TimeRange: larkTimeToday, Limit: 1}},
+		{input: "今天出库了哪些商品，多少数量", result: `{"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"ranking","group_by":["product"],"movement_type":"sales_outbound","time_range":"today","sort":"desc","limit":10,"presentation":"ranking"}`, action: larkActionAnalytics,
+			plan: &larkAnalyticsPlan{Domain: larkDomainMovement, Metric: larkMetricMovementQuantity, Operation: larkOperationRanking, GroupBy: larkGroupProduct, MovementType: larkMovementOutbound, TimeRange: larkTimeToday, Sort: "desc", Limit: 10, Presentation: larkPresentationRanking}},
 		{input: "今天调整了几次", result: `{"intent":"analytics","metric":"movement_count","movement_type":"adjustment","time_range":"today"}`, action: larkActionAnalytics,
 			plan: &larkAnalyticsPlan{Metric: larkMetricMovementCount, GroupBy: larkGroupNone, MovementType: larkMovementAdjustment, TimeRange: larkTimeToday, Limit: 1}},
 		{input: "今天库存总变动", result: `{"intent":"today_changes"}`, action: larkActionTodayChanges},
@@ -138,6 +140,7 @@ func Test_DeepSeek_maps_common_inventory_language_to_validated_query_plans(t *te
 			!strings.Contains(payload.Messages[0].Content, "analytics") ||
 			!strings.Contains(payload.Messages[0].Content, "group_by") ||
 			!strings.Contains(payload.Messages[0].Content, "哪个店铺出货最多") ||
+			!strings.Contains(payload.Messages[0].Content, "今天出库了哪些商品，多少数量") ||
 			strings.Contains(payload.Messages[0].Content, "inventory_value_ranking") ||
 			strings.Contains(payload.Messages[0].Content, "today_sales_ranking") {
 			t.Errorf("system prompt = %q", payload.Messages[0].Content)

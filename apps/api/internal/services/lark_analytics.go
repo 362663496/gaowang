@@ -210,6 +210,16 @@ func normalizeLarkAnalyticsPlan(plan larkAnalyticsPlan) (larkAnalyticsPlan, erro
 	}
 
 	operation := plan.effectiveOperation()
+	if plan.Metric != "" && operation != larkOperationTrend && operation != larkOperationShare && operation != larkOperationComparison {
+		inferred := larkOperationTotal
+		if plan.GroupBy != larkGroupNone {
+			inferred = larkOperationRanking
+		}
+		if operation != inferred {
+			operation = inferred
+			plan.Operation = inferred
+		}
+	}
 	switch operation {
 	case larkOperationTotal:
 		if plan.GroupBy != larkGroupNone || plan.GroupBy2 != "" {
@@ -332,7 +342,7 @@ func normalizeLarkAnalyticsPlan(plan larkAnalyticsPlan) (larkAnalyticsPlan, erro
 	}
 
 	if plan.Presentation != "" && plan.Presentation != larkPresentationAuto && plan.Presentation != plan.expectedPresentation() {
-		return larkAnalyticsPlan{}, errDeepSeekIntent
+		plan.Presentation = larkPresentationAuto
 	}
 	return plan, nil
 }

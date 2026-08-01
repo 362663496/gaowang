@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -25,12 +26,20 @@ func Test_DeepSeek_accepts_two_dimensions_and_extended_read_only_plans(t *testin
 		plan.DateTo != "2026-07-31" || plan.effectivePresentation() != larkPresentationMatrix {
 		t.Fatalf("two-dimensional plan = %+v", plan)
 	}
+	corrected, err := deepSeekResultCommand(`{
+		"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"details",
+		"group_by":["product"],"movement_type":"sales_outbound","time_range":"today","limit":10,"presentation":"detail"
+	}`)
+	if err != nil || corrected.Analytics == nil || corrected.Analytics.Operation != larkOperationRanking ||
+		corrected.Analytics.GroupBy != larkGroupProduct || corrected.Analytics.effectivePresentation() != larkPresentationRanking {
+		t.Fatalf("corrected grouped quantity plan = %+v err=%v", corrected.Analytics, err)
+	}
 
 	for name, content := range map[string]string{
-		"three dimensions":     `{"intent":"analytics","domain":"movement","metric":"movement_count","operation":"ranking","group_by":["product","shop","operator"],"time_range":"all"}`,
-		"duplicate dimensions": `{"intent":"analytics","domain":"movement","metric":"movement_count","operation":"ranking","group_by":["shop","shop"],"time_range":"all"}`,
-		"bad date":             `{"intent":"analytics","domain":"movement","metric":"movement_count","operation":"total","group_by":[],"time_range":"date_range","date_from":"2026-08-02","date_to":"2026-08-01"}`,
-		"wrong presentation":   `{"intent":"analytics","domain":"movement","metric":"movement_count","operation":"trend","group_by":[],"time_range":"current_month","time_bucket":"day","presentation":"ranking"}`,
+		"three dimensions":      `{"intent":"analytics","domain":"movement","metric":"movement_count","operation":"ranking","group_by":["product","shop","operator"],"time_range":"all"}`,
+		"duplicate dimensions":  `{"intent":"analytics","domain":"movement","metric":"movement_count","operation":"ranking","group_by":["shop","shop"],"time_range":"all"}`,
+		"bad date":              `{"intent":"analytics","domain":"movement","metric":"movement_count","operation":"total","group_by":[],"time_range":"date_range","date_from":"2026-08-02","date_to":"2026-08-01"}`,
+		"outside data boundary": `{"intent":"analytics","domain":"audit","operation":"details","group_by":[],"time_range":"all"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, planErr := deepSeekResultCommand(content)
@@ -83,6 +92,36 @@ func Test_DeepSeek_retries_only_transient_failures_and_records_diagnostics(t *te
 		}
 	})
 
+	t.Run("invalid plan is repaired once", func(t *testing.T) {
+		var requests int32
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			attempt := atomic.AddInt32(&requests, 1)
+			if attempt == 1 {
+				_, _ = response.Write([]byte(deepSeekCompletion(`{"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"ranking","group_by":["product"],"movement_type":"shipments","time_range":"today"}`)))
+				return
+			}
+			var payload struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || len(payload.Messages) != 4 ||
+				payload.Messages[2].Role != "assistant" || !strings.Contains(payload.Messages[2].Content, `"shipments"`) ||
+				payload.Messages[3].Content != deepSeekPlanRepairPrompt {
+				t.Errorf("repair payload = %+v err=%v", payload, err)
+			}
+			_, _ = response.Write([]byte(deepSeekCompletion(`{"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"ranking","group_by":["product"],"movement_type":"sales_outbound","time_range":"today"}`)))
+		}))
+		defer server.Close()
+		parser := &deepSeekIntentParser{apiKey: "secret", model: "model", endpoint: server.URL, client: server.Client()}
+		command, err := parser.Parse(context.Background(), "今天出了哪些货，各多少件")
+		if err != nil || command.Analytics == nil || command.Analytics.MovementType != larkMovementOutbound ||
+			command.AIAttempts != 2 || command.AIStage != "plan_validate" || atomic.LoadInt32(&requests) != 2 {
+			t.Fatalf("plan repair = command=%+v err=%v requests=%d", command, err, requests)
+		}
+	})
+
 	for name, response := range map[string]struct {
 		status int
 		body   string
@@ -102,7 +141,11 @@ func Test_DeepSeek_retries_only_transient_failures_and_records_diagnostics(t *te
 			parser := &deepSeekIntentParser{apiKey: "PRIVATE_KEY", model: "model", endpoint: server.URL, client: server.Client()}
 			_, err := parser.Parse(context.Background(), "PRIVATE_INPUT")
 			var diagnostic *deepSeekIntentError
-			if !errors.As(err, &diagnostic) || diagnostic.Attempts != 1 || atomic.LoadInt32(&requests) != 1 {
+			expectedAttempts := 1
+			if name == "bad plan" {
+				expectedAttempts = 2
+			}
+			if !errors.As(err, &diagnostic) || diagnostic.Attempts != expectedAttempts || atomic.LoadInt32(&requests) != int32(expectedAttempts) {
 				t.Fatalf("diagnostic = %#v requests=%d", err, requests)
 			}
 			for _, secret := range []string{"PRIVATE_KEY", "PRIVATE_INPUT", "PRIVATE_RESPONSE"} {

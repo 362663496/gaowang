@@ -64,7 +64,7 @@ const deepSeekIntentPrompt = `你是库存业务只读查询计划生成器。�
 - low_stock、out_of_stock、movements 可有 keyword；其他简单 intent 不得有 keyword。
 - 所有统计、排行、宽范围明细、趋势、占比、比较和多维问题使用 analytics。
 
-analytics 白名单字段：
+analytics 可查询字段：
 - domain：product、inventory、shop、movement、operator。
 - metric：inventory_quantity、inventory_value、movement_quantity、movement_count、movement_value。movement_value 是按当前采购价估算的采购/出库成本，不是销售额。
 - operation：total、details、ranking、trend、share、comparison。
@@ -80,17 +80,22 @@ analytics 白名单字段：
 规则：
 - inventory_* 只查询 current，只能 total/ranking/share，分组只能无或 [product]。
 - movement_* 可按商品、店铺、操作人任意一维或二维聚合。
-- details 可列出商品、当前库存、店铺、流水或历史操作人，最多 10 条。
+- details 只列逐条原始记录，metric 必须为空且 group_by 必须为 []，最多 10 条。
+- 用户问“哪些/每个/各”商品、店铺或操作人“多少数量/几笔/金额”时属于按维度聚合，使用 ranking 和对应 metric/group_by，不使用 details。
 - ranking 一到二维；share 仅一维；trend 最多再带一个业务维度；comparison 最多一个维度。
 - 三维及以上、敏感账号/权限/备份、写操作或能力外问题返回 unknown，不得静默丢维度。
-- presentation=auto 时由服务端选择；明确 presentation 必须匹配 operation。
+- 数据只限商品、当前库存、店铺、出入库流水和历史操作人姓名；不得查询邮箱、角色、权限、密码、审计、备份或系统设置。
+- presentation=auto 时由服务端选择；operation/presentation 标签冲突时服务端按 metric、group_by 和真实结果纠正，不丢筛选、维度或时间条件。
 
 示例：
 “哪个店铺出货最多” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"ranking","group_by":["shop"],"movement_type":"sales_outbound","time_range":"all","sort":"desc","limit":1,"presentation":"ranking"}
+“今天出库了哪些商品，多少数量” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"ranking","group_by":["product"],"movement_type":"sales_outbound","time_range":"today","sort":"desc","limit":10,"presentation":"ranking"}
 “今天按商品排序并列出店铺各占多少” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"ranking","group_by":["product","shop"],"movement_type":"sales_outbound","time_range":"today","sort":"desc","limit":10,"presentation":"matrix"}
 “本月各店铺销量占比” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"share","group_by":["shop"],"movement_type":"sales_outbound","time_range":"current_month","limit":10,"presentation":"share"}
 “今年每月出库趋势” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"trend","group_by":[],"movement_type":"sales_outbound","time_range":"current_year","time_bucket":"month","limit":10,"presentation":"trend"}
 “7月1日到7月31日和上期相比各商品出库量” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"comparison","group_by":["product"],"movement_type":"sales_outbound","time_range":"date_range","date_from":"2026-07-01","date_to":"2026-07-31","compare_to":"previous_period","limit":10,"presentation":"comparison"}`
+
+const deepSeekPlanRepairPrompt = `上一个 JSON 未通过本地计划校验。保留原问题的筛选、维度和时间，只使用系统消息列出的字段与枚举纠正计划；仍只输出一个 JSON 对象。超出商品业务数据边界时输出 {"intent":"unknown"}。`
 
 type deepSeekIntentParser struct {
 	apiKey   string
@@ -165,6 +170,25 @@ func (p *deepSeekIntentParser) Parse(ctx context.Context, input string) (larkCom
 		if attemptErr == nil {
 			command, planErr := deepSeekResultCommand(content)
 			if planErr != nil {
+				var diagnostic *deepSeekIntentError
+				if attempt == 1 && errors.As(planErr, &diagnostic) && diagnostic.Stage == "plan_validate" {
+					retryDiagnostic = diagnostic
+					payload.Messages = append(payload.Messages,
+						struct {
+							Role    string `json:"role"`
+							Content string `json:"content"`
+						}{Role: "assistant", Content: content},
+						struct {
+							Role    string `json:"role"`
+							Content string `json:"content"`
+						}{Role: "user", Content: deepSeekPlanRepairPrompt},
+					)
+					body, err = json.Marshal(payload)
+					if err != nil {
+						return larkCommand{}, finalizeDeepSeekFailure(deepSeekFailure("marshal", 0, false), attempt, time.Since(started))
+					}
+					continue
+				}
 				return larkCommand{}, finalizeDeepSeekFailure(planErr, attempt, time.Since(started))
 			}
 			command.AIAttempts = attempt
