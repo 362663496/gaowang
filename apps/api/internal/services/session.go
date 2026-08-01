@@ -75,7 +75,7 @@ func (s SessionService) LookupActiveUser(rawToken string) (models.User, models.S
 		_ = s.DB.Delete(&models.Session{}, "token_hash = ?", hash).Error
 		return models.User{}, models.Session{}, ErrSessionExpired
 	}
-	if !session.User.Enabled || session.User.ID == uuid.Nil {
+	if !session.User.Enabled || session.User.DeletedAt != nil || session.User.ID == uuid.Nil {
 		_ = s.DB.Delete(&models.Session{}, "token_hash = ?", hash).Error
 		return models.User{}, models.Session{}, ErrSessionNotFound
 	}

@@ -57,7 +57,7 @@ func migrateStaffPermissions(database *gorm.DB) error {
 		}
 
 		var staff []models.User
-		if err := tx.Where("role = ?", models.RoleStaff).Find(&staff).Error; err != nil {
+		if err := tx.Where("role = ? AND deleted_at IS NULL", models.RoleStaff).Find(&staff).Error; err != nil {
 			return fmt.Errorf("load staff users: %w", err)
 		}
 		var legacy []models.LegacyStaffPermission

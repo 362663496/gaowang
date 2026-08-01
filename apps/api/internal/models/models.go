@@ -32,12 +32,13 @@ const (
 )
 
 type User struct {
-	ID           uuid.UUID `gorm:"type:uuid;primaryKey"`
-	Name         string    `gorm:"not null"`
-	Email        string    `gorm:"uniqueIndex;not null"`
-	PasswordHash string    `gorm:"not null"`
-	Role         Role      `gorm:"type:varchar(20);not null"`
-	Enabled      bool      `gorm:"not null;default:true"`
+	ID           uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	Name         string     `gorm:"not null"`
+	Email        string     `gorm:"uniqueIndex;not null"`
+	PasswordHash string     `gorm:"not null"`
+	Role         Role       `gorm:"type:varchar(20);not null"`
+	Enabled      bool       `gorm:"not null;default:true"`
+	DeletedAt    *time.Time `gorm:"index"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -94,7 +95,6 @@ type Product struct {
 	Code                 string    `gorm:"uniqueIndex;not null"`
 	ImagePath            string
 	DefaultPurchaseCents int64 `gorm:"not null;default:0"`
-	DefaultSaleCents     int64 `gorm:"not null;default:0"`
 	LowStockThreshold    int64 `gorm:"not null;default:0"`
 	Note                 string
 	Enabled              bool       `gorm:"not null;default:true"`
@@ -126,12 +126,9 @@ type StockMovement struct {
 	Shop                *Shop        `gorm:"foreignKey:ShopID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 	QuantityDelta       int64        `gorm:"not null"`
 	PurchaseUnitCents   *int64
-	SaleUnitCents       *int64
 	CostUnitCents       int64 `gorm:"not null;default:0"`
 	PurchaseAmountCents int64 `gorm:"not null;default:0"`
-	RevenueCents        int64 `gorm:"not null;default:0"`
 	CostAmountCents     int64 `gorm:"not null;default:0"`
-	GrossProfitCents    int64 `gorm:"not null;default:0"`
 	Reason              string
 	OperatorID          uuid.UUID  `gorm:"type:uuid;not null;index"`
 	Operator            User       `gorm:"foreignKey:OperatorID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`

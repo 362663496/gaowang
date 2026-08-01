@@ -141,6 +141,15 @@ query.Session(&gorm.Session{}).Count(&total)
 query.Session(&gorm.Session{}).Offset(offset).Limit(size).Find(&items)
 ```
 
+## Scenario: Optional Inventory Operation Notes
+
+- `POST /inventory/inbound` and `POST /inventory/sales-outbound` accept an optional `note` string; omitted, empty, and whitespace-only values are equivalent.
+- The inventory service trims the note and rejects more than 500 Unicode characters before opening the stock transaction. A rejected note leaves snapshot, movement, and audit rows unchanged.
+- Persist a non-empty note in `StockMovement.Reason` and include the normalized value as audit metadata `note`; existing movement and Lark views render that field.
+- Adjustment still requires `reason`; note handling does not loosen its validation.
+
+Tests cover blank, normalized, exactly 500 characters, over-limit rollback, audit metadata, and Lark display.
+
 ## Scenario: Multipart Product Create And Update Images
 
 ### 1. Scope / Trigger
@@ -151,7 +160,7 @@ Use this contract when creating a product with its required main image or editin
 
 - Request: `PATCH /api/v1/products/:id`, content type `multipart/form-data`
 - Create: `POST /api/v1/products`, content type `multipart/form-data`, required `image`
-- Fields: `name`, `code`, `default_purchase_cents`, `default_sale_cents`, `low_stock_threshold`, `note`; `image` is required on create and optional on update
+- Fields: `name`, `code`, `default_purchase_cents`, `low_stock_threshold`, `note`; `image` is required on create and optional on update
 - Response: create uses `201 {"item": Product}`; update uses `200 {"item": Product}`
 
 ### 3. Contracts
@@ -237,11 +246,11 @@ Both endpoints accept exactly one JSON object with `expected_revision`, `note`, 
 - Sales outbound: positive `quantity`, required `shop_id`; no `quantity_delta` or operation price.
 - Adjustment: nonzero `quantity_delta`, required `note`, no quantity/unit/shop.
 - `note` and `change_reason` are at most 500 characters; `change_reason` is always required and exists only in audit metadata.
-- Product, type, original operator, `created_at`, and all price fields are absent from the request and immutable. Unknown JSON fields, including legacy `unit_cents`, are rejected.
+- Product, type, original operator, `created_at`, and operation price fields are absent from the request and immutable. Unknown JSON fields, including legacy `unit_cents`, are rejected.
 - Only the latest movement for the product under `created_at DESC, id DESC` is editable. Metadata-only edits are allowed for an archived product; numeric edits are not.
 - Preview returns `before`, `after`, `impact`, and `expected_revision`. Save returns the revised `item` and the same impact shape.
 - Numeric save reverses the saved `QuantityDelta` from the current snapshot and reapplies the same pure transition used by create with the product's current default prices. It updates the original row and increments `revision`; no movement is appended or deleted.
-- Inventory value, purchase amount, sales revenue, cost, and gross profit in list/preview/update responses are derived from current product prices, so historical amounts change immediately after a product price update.
+- Inventory value, inbound purchase amount, and outbound/adjustment cost in list/preview/update responses are derived from the current product purchase price, so historical amounts change immediately after a product price update.
 - Snapshot, movement, last editor/time, and complete `movement.updated` audit commit in one transaction.
 
 ### 4. Validation & Error Matrix
@@ -258,7 +267,7 @@ Both endpoints accept exactly one JSON object with `expected_revision`, `note`, 
 
 ### 5. Good / Base / Bad Cases
 
-- Good: revise latest sale quantity from 4 to 5; snapshot, row revenue/cost/gross, original-date reports, revision, editor, and audit all change together.
+- Good: revise latest sale quantity from 4 to 5; snapshot, row cost, original-date reports, revision, editor, and audit all change together.
 - Base: revise only note or shop; snapshot and all derived money fields remain unchanged while revision and audit advance.
 - Bad: calculate impact in the browser, patch a non-latest row, or update snapshot without the row/audit; these paths bypass accounting and stale-write protection.
 
@@ -266,7 +275,7 @@ Both endpoints accept exactly one JSON object with `expected_revision`, `note`, 
 
 - Service: all three transitions, zero/current product prices, metadata-only edit, archived numeric rejection, insufficient stock, stale ID/version, preview no-write, and audit-failure rollback.
 - Route: independent permission on preview/PATCH, strict legacy-price rejection, safe operator DTO without `PasswordHash`, `IsLatest`, stable error codes, and immutable identity/time.
-- Report: an edited sale remains in its original `created_at` period while revenue/cost/gross use the product's current prices.
+- Report: an edited sale remains in its original `created_at` period while its cost uses the product's current purchase price.
 
 ### 7. Wrong vs Correct
 

@@ -29,9 +29,8 @@ type updateProductEnabledRequest struct {
 }
 
 type productListSummary struct {
-	Total            int64 `json:"total"`
-	Enabled          int64 `json:"enabled"`
-	DefaultSaleCents int64 `json:"default_sale_cents"`
+	Total   int64 `json:"total"`
+	Enabled int64 `json:"enabled"`
 }
 
 func (h ProductHandler) List(c *gin.Context) {
@@ -45,7 +44,7 @@ func (h ProductHandler) List(c *gin.Context) {
 		query = query.Where("name ILIKE ? OR code ILIKE ?", like, like)
 	}
 	var summary productListSummary
-	if err := query.Session(&gorm.Session{}).Select("COUNT(*) AS total, COALESCE(SUM(CASE WHEN enabled = ? THEN 1 ELSE 0 END), 0) AS enabled, COALESCE(SUM(default_sale_cents), 0) AS default_sale_cents", true).Scan(&summary).Error; err != nil {
+	if err := query.Session(&gorm.Session{}).Select("COUNT(*) AS total, COALESCE(SUM(CASE WHEN enabled = ? THEN 1 ELSE 0 END), 0) AS enabled", true).Scan(&summary).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to summarize products")
 		return
 	}
@@ -118,7 +117,6 @@ func (h ProductHandler) Update(c *gin.Context) {
 	updates := map[string]any{
 		"name": updated.Name, "code": updated.Code, "note": updated.Note,
 		"default_purchase_cents": updated.DefaultPurchaseCents,
-		"default_sale_cents":     updated.DefaultSaleCents,
 		"low_stock_threshold":    updated.LowStockThreshold,
 	}
 	if newImagePath != "" {
@@ -257,10 +255,6 @@ func productFromForm(c *gin.Context) (models.Product, bool) {
 	}
 	var ok bool
 	product.DefaultPurchaseCents, ok = formInt(c, "default_purchase_cents")
-	if !ok {
-		return models.Product{}, false
-	}
-	product.DefaultSaleCents, ok = formInt(c, "default_sale_cents")
 	if !ok {
 		return models.Product{}, false
 	}

@@ -32,13 +32,12 @@ import { centsToYuanInput, formatMoney, formatQuantity, yuanToCents } from "@/li
 
 type ProductAction = { productID: string; type: "status" | "delete" } | null;
 type ProductListResponse = Paginated<Product> & {
-  summary: { total: number; enabled: number; default_sale_cents: number };
+  summary: { total: number; enabled: number };
 };
 type ProductFormValues = {
   name: string;
   code: string;
   purchase_yuan?: number;
-  sale_yuan?: number;
   low_stock_threshold?: number;
   note?: string;
 };
@@ -60,7 +59,7 @@ export default function ProductsPage() {
   const [busyAction, setBusyAction] = useState<ProductAction>(null);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(initialPagination);
-  const [summary, setSummary] = useState({ total: 0, enabled: 0, default_sale_cents: 0 });
+  const [summary, setSummary] = useState({ total: 0, enabled: 0 });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -145,7 +144,6 @@ export default function ProductsPage() {
     },
     { title: "编码", dataIndex: "Code", width: 150, render: (value: string) => <span className="mono">{value}</span> },
     { title: "进货价", dataIndex: "DefaultPurchaseCents", width: 120, render: formatMoney },
-    { title: "销售价", dataIndex: "DefaultSaleCents", width: 120, render: formatMoney },
     { title: "低库存", dataIndex: "LowStockThreshold", width: 100, render: formatQuantity },
     {
       title: "状态",
@@ -192,14 +190,14 @@ export default function ProductsPage() {
     <Flex gap={20} vertical>
       <PageHeader
         actions={canCreate ? <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreating(true)}>新增商品</Button> : null}
-        description="管理商品图片、编码、默认价格和低库存阈值。"
+        description="管理商品图片、编码、默认进货价和低库存阈值。"
         title="商品"
       />
 
       <Row gutter={[12, 12]}>
         <Col md={8} xs={24}><Card className="metric-card"><Statistic title="商品数" value={formatQuantity(summary.total)} /></Card></Col>
-        <Col md={8} xs={24}><Card className="metric-card"><Statistic title="默认售价合计" value={formatMoney(summary.default_sale_cents)} /></Card></Col>
         <Col md={8} xs={24}><Card className="metric-card"><Statistic title="已启用" value={formatQuantity(summary.enabled)} /></Card></Col>
+        <Col md={8} xs={24}><Card className="metric-card"><Statistic title="已禁用" value={formatQuantity(summary.total - summary.enabled)} /></Card></Col>
       </Row>
 
       <Card className="filter-card">
@@ -222,7 +220,7 @@ export default function ProductsPage() {
           loading={loading}
           pagination={tablePagination(pagination, setPage)}
           rowKey="ID"
-          scroll={{ x: 1100 }}
+          scroll={{ x: 980 }}
           size="middle"
         />
       </Card>
@@ -278,7 +276,6 @@ function ProductForm({ product, onCancel, onSaved }: {
     form.set("name", values.name);
     form.set("code", values.code);
     form.set("default_purchase_cents", String(yuanToCents(String(values.purchase_yuan ?? 0))));
-    form.set("default_sale_cents", String(yuanToCents(String(values.sale_yuan ?? 0))));
     form.set("low_stock_threshold", String(values.low_stock_threshold ?? 0));
     form.set("note", values.note ?? "");
     if (image) form.set("image", image);
@@ -300,7 +297,6 @@ function ProductForm({ product, onCancel, onSaved }: {
         name: product?.Name,
         code: product?.Code,
         purchase_yuan: Number(centsToYuanInput(product?.DefaultPurchaseCents ?? 0)),
-        sale_yuan: Number(centsToYuanInput(product?.DefaultSaleCents ?? 0)),
         low_stock_threshold: product?.LowStockThreshold ?? 0,
         note: product?.Note,
       }}
@@ -343,9 +339,6 @@ function ProductForm({ product, onCancel, onSaved }: {
         </Col>
         <Col sm={12} xs={24}>
           <Form.Item label="默认进货价（元）" name="purchase_yuan"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item>
-        </Col>
-        <Col sm={12} xs={24}>
-          <Form.Item label="默认销售价（元）" name="sale_yuan"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item>
         </Col>
         <Col sm={12} xs={24}>
           <Form.Item label="低库存阈值" name="low_stock_threshold"><InputNumber min={0} precision={0} style={{ width: "100%" }} /></Form.Item>

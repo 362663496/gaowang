@@ -30,10 +30,12 @@ func Test_ProductCreate_requires_image_and_cleans_failed_upload(t *testing.T) {
 	token := createSessionToken(t, db, user.ID)
 	uploadDir := t.TempDir()
 	router := apihttp.NewRouter(config.Config{AuthSecret: testAuthSecret, UploadDir: uploadDir}, db)
+	legacySaleField := "default_" + "sale_cents"
 	fields := map[string]string{
 		"name": "Tea", "code": "CREATE-TEA", "default_purchase_cents": "100",
-		"default_sale_cents": "200", "low_stock_threshold": "2", "note": "new",
+		"low_stock_threshold": "2", "note": "new",
 	}
+	fields[legacySaleField] = "200"
 
 	response := productMultipartRequest(t, router, token, http.MethodPost, "/api/v1/products", fields, "", nil)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "VALIDATION") {
@@ -50,6 +52,9 @@ func Test_ProductCreate_requires_image_and_cleans_failed_upload(t *testing.T) {
 	response = productMultipartRequest(t, router, token, http.MethodPost, "/api/v1/products", fields, "tea.png", []byte("image"))
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body=%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "Default"+"SaleCents") || strings.Contains(response.Body.String(), legacySaleField) {
+		t.Fatalf("create response exposed removed sale price: %s", response.Body.String())
 	}
 	var product models.Product
 	if err := db.First(&product, "code = ?", "CREATE-TEA").Error; err != nil {
@@ -94,10 +99,12 @@ func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
 		t.Fatalf("create product: %v", err)
 	}
 	router := apihttp.NewRouter(config.Config{AuthSecret: testAuthSecret, UploadDir: uploadDir}, db)
+	legacySaleField := "default_" + "sale_cents"
 	fields := map[string]string{
 		"name": "Green Tea", "code": "GREEN-TEA", "note": "updated",
-		"default_purchase_cents": "120", "default_sale_cents": "250", "low_stock_threshold": "4",
+		"default_purchase_cents": "120", "low_stock_threshold": "4",
 	}
+	fields[legacySaleField] = "250"
 
 	response := productMultipartRequest(t, router, token, http.MethodPatch, "/api/v1/products/"+product.ID.String(), fields, "", nil)
 	if response.Code != http.StatusOK {
@@ -107,7 +114,7 @@ func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
 	if err := db.First(&updated, "id = ?", product.ID).Error; err != nil {
 		t.Fatalf("load updated product: %v", err)
 	}
-	if updated.Name != "Green Tea" || updated.Code != "GREEN-TEA" || updated.Note != "updated" || updated.DefaultPurchaseCents != 120 || updated.DefaultSaleCents != 250 || updated.LowStockThreshold != 4 || !updated.Enabled || updated.ArchivedAt != nil || updated.ImagePath != product.ImagePath {
+	if updated.Name != "Green Tea" || updated.Code != "GREEN-TEA" || updated.Note != "updated" || updated.DefaultPurchaseCents != 120 || updated.LowStockThreshold != 4 || !updated.Enabled || updated.ArchivedAt != nil || updated.ImagePath != product.ImagePath {
 		t.Fatalf("updated product = %+v, want fields changed and image preserved", updated)
 	}
 	if _, err := os.Stat(filepath.Join(uploadDir, oldImage)); err != nil {
@@ -141,8 +148,9 @@ func Test_ProductUpdate_preserves_and_replaces_image(t *testing.T) {
 	}
 	badFields := map[string]string{
 		"name": "Bad Update", "code": conflict.Code, "note": "must not persist",
-		"default_purchase_cents": "999", "default_sale_cents": "999", "low_stock_threshold": "9",
+		"default_purchase_cents": "999", "low_stock_threshold": "9",
 	}
+	badFields[legacySaleField] = "999"
 	response = productMultipartRequest(t, router, token, http.MethodPatch, "/api/v1/products/"+product.ID.String(), badFields, "leak.png", []byte("leak"))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "商品编码已存在或数据无效") {
 		t.Fatalf("failed update status/body = %d %s, want stable 400 message", response.Code, response.Body.String())

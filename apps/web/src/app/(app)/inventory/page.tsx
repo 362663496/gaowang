@@ -178,7 +178,7 @@ export default function InventoryPage() {
                         </strong>
                       </div>
                       <div className="inventory-card-value">
-                        <span className="inventory-card-label">当前商品价格</span>
+                        <span className="inventory-card-label">当前成本</span>
                         <strong>{formatMoney(item.Product.DefaultPurchaseCents)}</strong>
                       </div>
                     </div>

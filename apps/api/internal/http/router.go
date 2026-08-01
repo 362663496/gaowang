@@ -80,6 +80,7 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 	group.POST("/settings", RequirePermission(services.PermSettingUpdate), settingHandler.Update)
 	group.GET("/users", RequirePermission(services.PermUserRead), userHandler.List)
 	group.POST("/users", RequirePermission(services.PermUserCreate), userHandler.Create)
+	group.DELETE("/users/:id", RequirePermission(services.PermUserDelete), userHandler.Delete)
 
 	group.GET("/permissions", RequirePermission(services.PermPermissionRead), permissionHandler.Get)
 	group.PUT("/permissions", RequirePermission(services.PermPermissionUpdate), permissionHandler.Update)

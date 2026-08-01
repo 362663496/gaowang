@@ -3,9 +3,11 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +30,7 @@ import (
 
 const (
 	larkQueueSize       = 64
-	larkResultLimit     = 5
+	larkResultLimit     = 10
 	larkKeywordMaxRunes = 100
 
 	larkActionInventory         = "lark.query_inventory"
@@ -187,10 +189,14 @@ func (b *larkBot) run(ctx context.Context) {
 }
 
 type larkCommand struct {
-	Action    string
-	Name      string
-	Keyword   string
-	Analytics *larkAnalyticsPlan
+	Action      string
+	Name        string
+	Keyword     string
+	Analytics   *larkAnalyticsPlan
+	AIAttempts  int
+	AIElapsedMS int64
+	AIStage     string
+	AIStatus    int
 }
 
 func larkMessageText(message larktypes.NormalizedMessage) string {
@@ -208,7 +214,7 @@ func (b *larkBot) resolveCommand(ctx context.Context, message larktypes.Normaliz
 		return larkCommand{Action: larkActionHelp, Name: "帮助"}, nil
 	}
 	if b.intentParser == nil {
-		return larkCommand{}, errDeepSeekIntent
+		return larkCommand{}, &deepSeekIntentError{Stage: "config"}
 	}
 	return b.intentParser.Parse(ctx, larkMessageText(message))
 }
@@ -221,8 +227,29 @@ func (b *larkBot) handle(ctx context.Context, message larktypes.NormalizedMessag
 		err  error
 	)
 	if resolveErr != nil {
-		card, err = larkAIUnavailableCard()
+		var diagnostic *deepSeekIntentError
+		if errors.As(resolveErr, &diagnostic) {
+			slog.Warn("resolve lark AI plan",
+				slog.String("message_id", message.MessageID),
+				slog.String("stage", diagnostic.Stage),
+				slog.Int("status", diagnostic.StatusCode),
+				slog.Int("attempts", diagnostic.Attempts),
+				slog.Int64("elapsed_ms", diagnostic.Elapsed.Milliseconds()))
+		}
+		if deepSeekFailureIsPlan(resolveErr) {
+			card, err = larkAIUnsupportedCard()
+		} else {
+			card, err = larkAIUnavailableCard()
+		}
 	} else {
+		if command.AIAttempts > 1 {
+			slog.Info("lark AI retry recovered",
+				slog.String("message_id", message.MessageID),
+				slog.String("stage", command.AIStage),
+				slog.Int("status", command.AIStatus),
+				slog.Int("attempts", command.AIAttempts),
+				slog.Int64("elapsed_ms", command.AIElapsedMS))
+		}
 		b.recordAudit(message, command)
 	}
 
@@ -312,6 +339,10 @@ func (b *larkBot) recordAudit(message larktypes.NormalizedMessage, command larkC
 		"sender_open_id": message.UserID,
 		"command":        command.Name,
 		"keyword":        command.Keyword,
+	}
+	if command.AIAttempts > 0 {
+		values["ai_attempts"] = strconv.Itoa(command.AIAttempts)
+		values["ai_elapsed_ms"] = strconv.FormatInt(command.AIElapsedMS, 10)
 	}
 	if command.Analytics != nil {
 		for key, value := range command.Analytics.auditMetadata() {
@@ -617,9 +648,9 @@ func larkQueryCard(command larkCommand, rows []larkProductRow, more bool, imageK
 		elements = append(elements, element)
 	}
 	if more {
-		moreText := "结果超过 5 条，请缩小关键词。"
+		moreText := fmt.Sprintf("结果超过 %d 条，请缩小关键词。", larkResultLimit)
 		if command.Action == larkActionValueRanking || command.Action == larkActionTodaySalesRanking {
-			moreText = "仅展示前 5 条。"
+			moreText = fmt.Sprintf("仅展示前 %d 条。", larkResultLimit)
 		}
 		elements = append(elements, larkcard.NewMessageCardMarkdown().Content(moreText).Build())
 	}
@@ -694,7 +725,7 @@ func larkMovementsCard(movements []models.StockMovement, more bool, imageKeys []
 		elements = append(elements, larkMovementElement(movement, larkImageKeyAt(imageKeys, index)))
 	}
 	if more {
-		elements = append(elements, larkcard.NewMessageCardMarkdown().Content("结果超过 5 条，请缩小关键词。").Build())
+		elements = append(elements, larkcard.NewMessageCardMarkdown().Content(fmt.Sprintf("结果超过 %d 条，请缩小关键词。", larkResultLimit)).Build())
 	}
 	return larkCard("最近流水", "blue", elements)
 }
@@ -796,18 +827,23 @@ func larkHelpCard() (string, error) {
 			"- `BR-1214G 还有多少？`\n"+
 			"- `哪些商品快没了？` / `把缺货商品列出来`\n"+
 			"- `库存总金额是多少？` / `库存金额最高的是哪些？`\n"+
-			"- `绿茶最近谁操作过？`\n"+
-			"- `今天出了多少货？` / `今天什么卖得最好？`\n"+
-			"- `哪个店铺出货最多？` / `本月谁操作次数最多？`")
+			"- `晴朗店铺今天卖了哪些商品？`\n"+
+			"- `今天按商品和店铺统计销售数量`\n"+
+			"- `今天什么卖得最好？` / `哪个店铺出货最多？` / `本月谁操作次数最多？`\n"+
+			"- `今年每月出库趋势` / `本月各店铺销量占比`\n"+
+			"- `7月销售和上期相比如何？` / `列出最近10条流水`")
 }
 
 func larkAIUnavailableCard() (string, error) {
-	return larkSimpleCard("智能识别暂时不可用", "orange",
-		"本次没有执行查询或库存操作，请稍后再试。")
+	return larkSimpleCard("智能服务暂时异常", "orange", "上游服务本次未能完成识别，没有执行查询或库存操作，请稍后再试。")
+}
+
+func larkAIUnsupportedCard() (string, error) {
+	return larkSimpleCard("这次没有理解清楚", "grey", "本次没有执行查询或库存操作。可以减少到最多两个统计维度，或明确时间、指标和排序方式后重试。")
 }
 
 func larkUnknownCard() (string, error) {
-	return larkSimpleCard("只支持库存查询", "grey", "我可以按商品、店铺或操作人查询当前库存、金额、入库、出库和流水统计，也可以查商品详情、低库存、缺货和最近流水。问“你会什么”可查看示例。")
+	return larkSimpleCard("当前问题不在查询范围", "grey", "我可以查询商品、当前库存、店铺、出入库流水和历史操作人，支持最多两个维度的明细、汇总、排行、趋势、占比和对比。问“你会什么”可查看示例。")
 }
 
 func larkField(content string) *larkcard.MessageCardField {

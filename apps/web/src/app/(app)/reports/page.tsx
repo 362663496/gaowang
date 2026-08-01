@@ -72,12 +72,12 @@ export default function ReportsPage() {
 
   return (
     <Flex gap={20} vertical>
-      <PageHeader description="销售额、成本、毛利、库存金额和低库存概览。" title="报表" />
+      <PageHeader description="销售数量、出库笔数、估算采购成本、库存金额和低库存概览。" title="报表" />
       {canSummary && summary ? (
         <Row gutter={[12, 12]}>
-          <Col lg={5} sm={12} xs={24}><Metric label="销售额" value={formatMoney(summary.revenue_cents)} /></Col>
-          <Col lg={5} sm={12} xs={24}><Metric label="销售成本" value={formatMoney(summary.cost_cents)} /></Col>
-          <Col lg={5} sm={12} xs={24}><Metric label="毛利" value={formatMoney(summary.gross_profit_cents)} /></Col>
+          <Col lg={5} sm={12} xs={24}><Metric label="销售数量" value={formatQuantity(summary.quantity_sold)} /></Col>
+          <Col lg={5} sm={12} xs={24}><Metric label="出库笔数" value={formatQuantity(summary.movement_count)} /></Col>
+          <Col lg={5} sm={12} xs={24}><Metric label="估算采购成本" value={formatMoney(summary.cost_cents)} /></Col>
           {canInventory ? <Col lg={5} sm={12} xs={24}><Metric label="库存金额" value={formatMoney(inventoryValue)} /></Col> : null}
           {canInventory ? <Col lg={4} sm={12} xs={24}><Metric label="低库存品类" value={formatQuantity(lowStock.length)} /></Col> : null}
         </Row>
@@ -95,11 +95,11 @@ export default function ReportsPage() {
                 sublabel: item.product_code,
                 imagePath: item.product_image_path,
                 archived: item.archived,
-                revenue: item.revenue_cents,
+                cost: item.cost_cents,
                 quantity: item.quantity_sold,
-                gross: item.gross_profit_cents,
+                movementCount: item.movement_count,
               }))}
-              title="商品销售排行"
+              title="商品销售数量排行"
             />
           </Col>
         ) : null}
@@ -109,11 +109,11 @@ export default function ReportsPage() {
           rows={shops.map((item) => ({
             id: item.shop_id,
             label: item.shop_name,
-            revenue: item.revenue_cents,
+            cost: item.cost_cents,
             quantity: item.quantity_sold,
-            gross: item.gross_profit_cents,
+            movementCount: item.movement_count,
           }))}
-          title="店铺销售排行"
+          title="店铺销售数量排行"
         />
       ) : null}
       {canInventory ? (
@@ -141,9 +141,9 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 function TrendPanel({ rows }: { rows: SalesTrendRow[] }) {
-  const max = Math.max(...rows.map((row) => row.revenue_cents), 1);
+  const max = Math.max(...rows.map((row) => row.quantity_sold), 1);
   return (
-    <Card title="销售趋势">
+    <Card title="销售数量趋势">
       {rows.length === 0 ? (
         <PageEmpty title="暂无趋势数据" />
       ) : (
@@ -151,8 +151,8 @@ function TrendPanel({ rows }: { rows: SalesTrendRow[] }) {
           dataSource={rows}
           renderItem={(row) => (
             <List.Item>
-              <List.Item.Meta description={formatMoney(row.revenue_cents)} title={row.day} />
-              <Progress percent={Math.round((row.revenue_cents / max) * 100)} showInfo={false} style={{ width: 160 }} />
+              <List.Item.Meta description={`出库 ${formatQuantity(row.quantity_sold)} · ${formatQuantity(row.movement_count)} 笔 · 估算成本 ${formatMoney(row.cost_cents)}`} title={row.day} />
+              <Progress percent={Math.round((row.quantity_sold / max) * 100)} showInfo={false} style={{ width: 160 }} />
             </List.Item>
           )}
         />
@@ -166,7 +166,7 @@ function RankingPanel({
   title,
 }: {
   title: string;
-  rows: Array<{ id: string; label: string; sublabel?: string; imagePath?: string; archived?: boolean; revenue: number; quantity: number; gross: number }>;
+  rows: Array<{ id: string; label: string; sublabel?: string; imagePath?: string; archived?: boolean; cost: number; quantity: number; movementCount: number }>;
 }) {
   return (
     <Card title={title}>
@@ -181,7 +181,7 @@ function RankingPanel({
                 avatar={<Tag color="blue">#{index + 1}</Tag>}
                 description={
                   <span>
-                    销量 {formatQuantity(row.quantity)} · 毛利 {formatMoney(row.gross)}
+                    销量 {formatQuantity(row.quantity)} · {formatQuantity(row.movementCount)} 笔
                   </span>
                 }
                 title={row.sublabel !== undefined ? (
@@ -195,7 +195,7 @@ function RankingPanel({
                   />
                 ) : row.label}
               />
-              <strong>{formatMoney(row.revenue)}</strong>
+              <strong>估算成本 {formatMoney(row.cost)}</strong>
             </List.Item>
           )}
         />

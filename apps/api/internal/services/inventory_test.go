@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"gaowang/apps/api/internal/models"
 	"github.com/google/uuid"
@@ -71,9 +72,11 @@ func Test_StockMovement_migration_defaults_existing_revision(t *testing.T) {
 	if err := db.Create(&operator).Error; err != nil {
 		t.Fatalf("create operator: %v", err)
 	}
+	legacySaleUnit := int64(250)
 	legacy := legacyStockMovement{
 		ID: uuid.New(), Type: models.MovementTypeInbound, ProductID: product.ID,
-		QuantityDelta: 1, OperatorID: operator.ID, CreatedAt: time.Now().UTC(),
+		QuantityDelta: 1, SaleUnitCents: &legacySaleUnit, RevenueCents: 250, GrossProfitCents: 150,
+		OperatorID: operator.ID, CreatedAt: time.Now().UTC(),
 	}
 	if err := db.Create(&legacy).Error; err != nil {
 		t.Fatalf("create legacy movement: %v", err)
@@ -88,13 +91,20 @@ func Test_StockMovement_migration_defaults_existing_revision(t *testing.T) {
 	if movement.Revision != 1 || movement.LastEditedByID != nil {
 		t.Fatalf("migrated revision/editor = %d/%v, want 1/nil", movement.Revision, movement.LastEditedByID)
 	}
+	var preserved legacyStockMovement
+	if err := db.First(&preserved, "id = ?", legacy.ID).Error; err != nil {
+		t.Fatalf("load preserved legacy amounts: %v", err)
+	}
+	if preserved.SaleUnitCents == nil || *preserved.SaleUnitCents != legacySaleUnit || preserved.RevenueCents != 250 || preserved.GrossProfitCents != 150 {
+		t.Fatalf("legacy amounts changed after migration: %+v", preserved)
+	}
 }
 
 func Test_InventoryService_records_inbound_sale_and_adjustment(t *testing.T) {
 	// Given
 	db := newInventoryTestDB(t)
 	product := models.Product{
-		Name: "Tea", Code: "TEA", DefaultPurchaseCents: 100, DefaultSaleCents: 250, Enabled: true,
+		Name: "Tea", Code: "TEA", DefaultPurchaseCents: 100, Enabled: true,
 	}
 	operator := models.User{Name: "Admin", Email: "admin@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
 	shop := models.Shop{Name: "Main", Enabled: true}
@@ -147,8 +157,56 @@ func Test_InventoryService_records_inbound_sale_and_adjustment(t *testing.T) {
 	if err := db.First(&outbound, "type = ?", models.MovementTypeSalesOutbound).Error; err != nil {
 		t.Fatalf("load outbound movement: %v", err)
 	}
-	if outbound.RevenueCents != 1000 || outbound.CostAmountCents != 400 || outbound.GrossProfitCents != 600 {
-		t.Fatalf("outbound amounts = revenue %d cost %d gross %d, want 1000/400/600", outbound.RevenueCents, outbound.CostAmountCents, outbound.GrossProfitCents)
+	if outbound.CostAmountCents != 400 {
+		t.Fatalf("outbound cost = %d, want 400", outbound.CostAmountCents)
+	}
+}
+
+func Test_InventoryService_normalizes_and_validates_optional_notes(t *testing.T) {
+	db := newInventoryTestDB(t)
+	product := models.Product{Name: "Tea", Code: "NOTE-TEA", DefaultPurchaseCents: 100, Enabled: true}
+	operator := models.User{Name: "Admin", Email: "notes@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
+	shop := models.Shop{Name: "Main", Enabled: true}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	if err := db.Create(&operator).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&shop).Error; err != nil {
+		t.Fatalf("create shop: %v", err)
+	}
+	service := InventoryService{DB: db}
+
+	blank, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 2, Note: " \n\t ", OperatorID: operator.ID})
+	if err != nil {
+		t.Fatalf("CreateInbound() blank note error = %v", err)
+	}
+	if blank.Movement.Reason != "" {
+		t.Fatalf("blank note = %q, want empty", blank.Movement.Reason)
+	}
+	boundary := strings.Repeat("界", 500)
+	withNote, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 1, Note: "  " + boundary + "  ", OperatorID: operator.ID})
+	if err != nil {
+		t.Fatalf("CreateSalesOutbound() 500-rune note error = %v", err)
+	}
+	if withNote.Movement.Reason != boundary {
+		t.Fatalf("normalized note rune count = %d, want 500", utf8.RuneCountInString(withNote.Movement.Reason))
+	}
+
+	if _, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 1, Note: strings.Repeat("界", 501), OperatorID: operator.ID}); err == nil {
+		t.Fatal("CreateInbound() overlong note error = nil")
+	}
+	var snapshot models.InventorySnapshot
+	if err := db.First(&snapshot, "product_id = ?", product.ID).Error; err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	var movementCount int64
+	if err := db.Model(&models.StockMovement{}).Where("product_id = ?", product.ID).Count(&movementCount).Error; err != nil {
+		t.Fatalf("count movements: %v", err)
+	}
+	if snapshot.Quantity != 1 || movementCount != 2 {
+		t.Fatalf("state after rejected note = quantity %d movements %d, want 1/2", snapshot.Quantity, movementCount)
 	}
 }
 
@@ -184,7 +242,7 @@ func Test_InventoryService_allows_zero_product_prices_for_all_operations(t *test
 		t.Fatalf("movements = %+v, want three operations and inbound without shop", movements)
 	}
 	for _, movement := range movements {
-		if movement.PurchaseAmountCents != 0 || movement.RevenueCents != 0 || movement.CostAmountCents != 0 || movement.GrossProfitCents != 0 {
+		if movement.PurchaseAmountCents != 0 || movement.CostAmountCents != 0 {
 			t.Fatalf("zero-price movement amounts = %+v, want all zero", movement)
 		}
 	}
@@ -246,7 +304,7 @@ func Test_InventoryService_rejects_all_writes_for_archived_product(t *testing.T)
 func Test_InventoryService_reprices_stock_and_movements_after_product_price_change(t *testing.T) {
 	db := newInventoryTestDB(t)
 	product := models.Product{
-		Name: "Coffee", Code: "COF", DefaultPurchaseCents: 100, DefaultSaleCents: 150, Enabled: true,
+		Name: "Coffee", Code: "COF", DefaultPurchaseCents: 100, Enabled: true,
 	}
 	operator := models.User{Name: "Admin", Email: "admin2@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
 	shop := models.Shop{Name: "Second", Enabled: true}
@@ -263,8 +321,8 @@ func Test_InventoryService_reprices_stock_and_movements_after_product_price_chan
 	if _, err := service.CreateInbound(InboundInput{ProductID: product.ID, Quantity: 5, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("CreateInbound() error = %v", err)
 	}
-	if err := db.Model(&product).Updates(map[string]any{"default_purchase_cents": 125, "default_sale_cents": 250}).Error; err != nil {
-		t.Fatalf("change product prices: %v", err)
+	if err := db.Model(&product).Update("default_purchase_cents", 125).Error; err != nil {
+		t.Fatalf("change product purchase price: %v", err)
 	}
 
 	if _, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 2, OperatorID: operator.ID}); err != nil {
@@ -282,8 +340,8 @@ func Test_InventoryService_reprices_stock_and_movements_after_product_price_chan
 	if err := db.First(&outbound, "type = ?", models.MovementTypeSalesOutbound).Error; err != nil {
 		t.Fatalf("load outbound movement: %v", err)
 	}
-	if outbound.RevenueCents != 500 || outbound.CostAmountCents != 250 || outbound.GrossProfitCents != 250 {
-		t.Fatalf("outbound revenue/cost/gross = %d/%d/%d, want 500/250/250", outbound.RevenueCents, outbound.CostAmountCents, outbound.GrossProfitCents)
+	if outbound.CostAmountCents != 250 {
+		t.Fatalf("outbound cost = %d, want 250", outbound.CostAmountCents)
 	}
 	var inbound models.StockMovement
 	if err := db.Preload("Product").First(&inbound, "type = ?", models.MovementTypeInbound).Error; err != nil {
@@ -301,7 +359,7 @@ func Test_InventoryService_reprices_stock_and_movements_after_product_price_chan
 func Test_InventoryService_updates_latest_inbound_sale_and_adjustment(t *testing.T) {
 	db := newInventoryTestDB(t)
 	product := models.Product{
-		Name: "Tea", Code: "EDIT-TEA", DefaultPurchaseCents: 100, DefaultSaleCents: 250, Enabled: true,
+		Name: "Tea", Code: "EDIT-TEA", DefaultPurchaseCents: 100, Enabled: true,
 	}
 	operator := models.User{Name: "Operator", Email: "operator@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
 	editor := models.User{Name: "Editor", Email: "editor@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
@@ -353,9 +411,6 @@ func Test_InventoryService_updates_latest_inbound_sale_and_adjustment(t *testing
 	if _, err := service.CreateSalesOutbound(OutboundInput{ProductID: product.ID, ShopID: shop.ID, Quantity: 4, OperatorID: operator.ID}); err != nil {
 		t.Fatalf("create sale: %v", err)
 	}
-	if err := db.Model(&product).Update("default_sale_cents", 300).Error; err != nil {
-		t.Fatalf("change sale price: %v", err)
-	}
 	sale := latestTestMovement(t, db, product.ID)
 	saleCreatedAt := sale.CreatedAt
 	quantity = 5
@@ -367,8 +422,8 @@ func Test_InventoryService_updates_latest_inbound_sale_and_adjustment(t *testing
 	if err != nil {
 		t.Fatalf("update sale: %v", err)
 	}
-	if saleUpdated.QuantityDelta != -5 || saleUpdated.RevenueCents != 1500 || saleUpdated.CostAmountCents != 550 || saleUpdated.GrossProfitCents != 950 {
-		t.Fatalf("sale amounts = delta/revenue/cost/gross %d/%d/%d/%d", saleUpdated.QuantityDelta, saleUpdated.RevenueCents, saleUpdated.CostAmountCents, saleUpdated.GrossProfitCents)
+	if saleUpdated.QuantityDelta != -5 || saleUpdated.CostAmountCents != 550 {
+		t.Fatalf("sale delta/cost = %d/%d, want -5/550", saleUpdated.QuantityDelta, saleUpdated.CostAmountCents)
 	}
 	if !saleUpdated.CreatedAt.Equal(saleCreatedAt) {
 		t.Fatalf("sale created_at changed from %s to %s", saleCreatedAt, saleUpdated.CreatedAt)
@@ -492,7 +547,7 @@ func Test_InventoryService_rejects_stale_and_archived_numeric_movement_updates(t
 func Test_InventoryService_rolls_back_rejected_or_unaudited_movement_update(t *testing.T) {
 	db := newInventoryTestDB(t)
 	product := models.Product{
-		Name: "Milk", Code: "EDIT-MILK", DefaultPurchaseCents: 100, DefaultSaleCents: 200, Enabled: true,
+		Name: "Milk", Code: "EDIT-MILK", DefaultPurchaseCents: 100, Enabled: true,
 	}
 	operator := models.User{Name: "Admin", Email: "rollback@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
 	shop := models.Shop{Name: "Rollback Shop", Enabled: true}
@@ -584,6 +639,7 @@ func newInventoryTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// legacyStockMovement keeps rollback-only finance columns visible to the migration regression.
 type legacyStockMovement struct {
 	ID                  uuid.UUID `gorm:"type:uuid;primaryKey"`
 	Type                models.MovementType

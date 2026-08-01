@@ -15,34 +15,82 @@ import (
 const (
 	deepSeekEndpoint         = "https://api.deepseek.com/chat/completions"
 	deepSeekResponseMaxBytes = 32 << 10
+	deepSeekTotalTimeout     = 10 * time.Second
+	deepSeekRetryDelay       = 100 * time.Millisecond
 	larkAIInputMaxRunes      = 300
 )
 
 var errDeepSeekIntent = errors.New("deepseek intent parsing failed")
 
-const deepSeekIntentPrompt = `你是库存机器人的查询计划生成器。只输出一个 JSON 对象，不要回答用户问题。
-允许的 intent：inventory、low_stock、out_of_stock、inventory_summary、movements、today_changes、analytics、help、unknown。
-inventory 用于查询某个商品的库存、当前采购价、库存金额或状态，必须提取 keyword。
-low_stock 用于查询低库存或补货预警，可选 keyword；out_of_stock 用于列出哪些商品缺货或库存为零，可选 keyword。
-inventory_summary 只用于同时查看多项库存概览，或商品种类数、低库存/缺货种类数；单项库存数量或金额统计用 analytics，询问“哪些缺货”用 out_of_stock。
-movements 只用于列出最近流水或操作记录，可选 keyword；today_changes 只用于同时查看今天入库、出库和调整的概览，单项数量/笔数用 analytics。
-help 用于询问机器人会什么或怎么用；非库存相关问题返回 unknown。只有 inventory、low_stock、out_of_stock、movements 可以包含 keyword。
+type deepSeekIntentError struct {
+	Stage      string
+	StatusCode int
+	Retryable  bool
+	Attempts   int
+	Elapsed    time.Duration
+}
 
-统计、排行、比较、按条件求总量一律使用 analytics，并组合以下字段：
-- metric：inventory_quantity、inventory_value、movement_quantity、movement_count、movement_value。
-- group_by：none、product、shop、operator。必须保留用户问的维度，问店铺就用 shop，问商品就用 product，问谁就用 operator。
-- movement_type：all、inbound、sales_outbound、adjustment；inventory_* 指标留空。
-- time_range：current、today、yesterday、last_n_days、current_month、all。流水没有时间词用 all；inventory_* 只用 current。
-- days：仅 last_n_days 使用，1 到 365；sort：分组时 asc 或 desc；limit：分组时 1 到 5。
-- product_keyword、shop_keyword、operator_keyword：只保留用户明确给出的名称或编码。
-当前库存指标只允许 group_by 为 none 或 product；其余统计使用 movement_* 指标。
+func (e *deepSeekIntentError) Error() string {
+	return fmt.Sprintf("%s: stage=%s status=%d retryable=%t attempts=%d elapsed_ms=%d",
+		errDeepSeekIntent, e.Stage, e.StatusCode, e.Retryable, e.Attempts, e.Elapsed.Milliseconds())
+}
+
+func (e *deepSeekIntentError) Unwrap() error { return errDeepSeekIntent }
+
+func deepSeekFailure(stage string, statusCode int, retryable bool) error {
+	return &deepSeekIntentError{Stage: stage, StatusCode: statusCode, Retryable: retryable}
+}
+
+func finalizeDeepSeekFailure(err error, attempts int, elapsed time.Duration) error {
+	var diagnostic *deepSeekIntentError
+	if !errors.As(err, &diagnostic) {
+		return &deepSeekIntentError{Stage: "plan_validate", Attempts: attempts, Elapsed: elapsed}
+	}
+	copy := *diagnostic
+	copy.Attempts = attempts
+	copy.Elapsed = elapsed
+	return &copy
+}
+
+func deepSeekFailureIsPlan(err error) bool {
+	var diagnostic *deepSeekIntentError
+	return errors.As(err, &diagnostic) && (diagnostic.Stage == "plan_decode" || diagnostic.Stage == "plan_validate")
+}
+
+const deepSeekIntentPrompt = `你是库存业务只读查询计划生成器。只输出一个 JSON 对象，不回答问题、不计算数字、不生成 SQL、Markdown 或飞书卡片。
+
+简单 intent：inventory、low_stock、out_of_stock、inventory_summary、movements、today_changes、analytics、help、unknown。
+- inventory 查询单个商品当前库存/采购价/库存价值，必须有 keyword。
+- low_stock、out_of_stock、movements 可有 keyword；其他简单 intent 不得有 keyword。
+- 所有统计、排行、宽范围明细、趋势、占比、比较和多维问题使用 analytics。
+
+analytics 白名单字段：
+- domain：product、inventory、shop、movement、operator。
+- metric：inventory_quantity、inventory_value、movement_quantity、movement_count、movement_value。movement_value 是按当前采购价估算的采购/出库成本，不是销售额。
+- operation：total、details、ranking、trend、share、comparison。
+- group_by：数组，元素只能是 product、shop、operator，最多两个且不得重复；必须保留用户要求的全部维度。
+- movement_type：all、inbound、sales_outbound、adjustment。
+- time_range：current、today、yesterday、current_week、previous_week、current_month、previous_month、current_year、last_n_days、date_range、all。
+- days：仅 last_n_days，1..365；date_from/date_to：仅 date_range，YYYY-MM-DD，含首尾日期。
+- time_bucket：trend 时 day 或 month；compare_to：comparison 时 previous_period 或 previous_year。
+- sort：asc 或 desc；limit：1..10。
+- presentation：auto、summary、detail、ranking、matrix、trend、share、comparison。
+- product_keyword、shop_keyword、operator_keyword：只放用户明确给出的名称或编码。
+
+规则：
+- inventory_* 只查询 current，只能 total/ranking/share，分组只能无或 [product]。
+- movement_* 可按商品、店铺、操作人任意一维或二维聚合。
+- details 可列出商品、当前库存、店铺、流水或历史操作人，最多 10 条。
+- ranking 一到二维；share 仅一维；trend 最多再带一个业务维度；comparison 最多一个维度。
+- 三维及以上、敏感账号/权限/备份、写操作或能力外问题返回 unknown，不得静默丢维度。
+- presentation=auto 时由服务端选择；明确 presentation 必须匹配 operation。
 
 示例：
-“哪个店铺出货最多” => {"intent":"analytics","metric":"movement_quantity","group_by":"shop","movement_type":"sales_outbound","time_range":"all","sort":"desc","limit":1}
-“今天哪个商品卖得最好” => {"intent":"analytics","metric":"movement_quantity","group_by":"product","movement_type":"sales_outbound","time_range":"today","sort":"desc","limit":1}
-“近7天张三出库多少” => {"intent":"analytics","metric":"movement_quantity","group_by":"none","movement_type":"sales_outbound","time_range":"last_n_days","days":7,"operator_keyword":"张三"}
-“库存金额最高的商品” => {"intent":"analytics","metric":"inventory_value","group_by":"product","time_range":"current","sort":"desc","limit":5}
-不要把不支持的维度替换成相近维度，不得生成 SQL。`
+“哪个店铺出货最多” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"ranking","group_by":["shop"],"movement_type":"sales_outbound","time_range":"all","sort":"desc","limit":1,"presentation":"ranking"}
+“今天按商品排序并列出店铺各占多少” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"ranking","group_by":["product","shop"],"movement_type":"sales_outbound","time_range":"today","sort":"desc","limit":10,"presentation":"matrix"}
+“本月各店铺销量占比” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"share","group_by":["shop"],"movement_type":"sales_outbound","time_range":"current_month","limit":10,"presentation":"share"}
+“今年每月出库趋势” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"trend","group_by":[],"movement_type":"sales_outbound","time_range":"current_year","time_bucket":"month","limit":10,"presentation":"trend"}
+“7月1日到7月31日和上期相比各商品出库量” => {"intent":"analytics","domain":"movement","metric":"movement_quantity","operation":"comparison","group_by":["product"],"movement_type":"sales_outbound","time_range":"date_range","date_from":"2026-07-01","date_to":"2026-07-31","compare_to":"previous_period","limit":10,"presentation":"comparison"}`
 
 type deepSeekIntentParser struct {
 	apiKey   string
@@ -64,9 +112,10 @@ func newDeepSeekIntentParser(apiKey string, model string) *deepSeekIntentParser 
 }
 
 func (p *deepSeekIntentParser) Parse(ctx context.Context, input string) (larkCommand, error) {
+	started := time.Now()
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return larkCommand{}, errDeepSeekIntent
+		return larkCommand{}, finalizeDeepSeekFailure(deepSeekFailure("plan_validate", 0, false), 0, time.Since(started))
 	}
 	inputRunes := []rune(input)
 	if len(inputRunes) > larkAIInputMaxRunes {
@@ -88,7 +137,7 @@ func (p *deepSeekIntentParser) Parse(ctx context.Context, input string) (larkCom
 		MaxTokens int `json:"max_tokens"`
 	}{
 		Model:     p.model,
-		MaxTokens: 220,
+		MaxTokens: 480,
 	}
 	payload.Messages = append(payload.Messages,
 		struct {
@@ -105,22 +154,59 @@ func (p *deepSeekIntentParser) Parse(ctx context.Context, input string) (larkCom
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return larkCommand{}, errDeepSeekIntent
+		return larkCommand{}, finalizeDeepSeekFailure(deepSeekFailure("marshal", 0, false), 0, time.Since(started))
 	}
+	parseCtx, cancel := context.WithTimeout(ctx, deepSeekTotalTimeout)
+	defer cancel()
+
+	var retryDiagnostic *deepSeekIntentError
+	for attempt := 1; attempt <= 2; attempt++ {
+		content, attemptErr := p.attempt(parseCtx, body)
+		if attemptErr == nil {
+			command, planErr := deepSeekResultCommand(content)
+			if planErr != nil {
+				return larkCommand{}, finalizeDeepSeekFailure(planErr, attempt, time.Since(started))
+			}
+			command.AIAttempts = attempt
+			command.AIElapsedMS = time.Since(started).Milliseconds()
+			if retryDiagnostic != nil {
+				command.AIStage = retryDiagnostic.Stage
+				command.AIStatus = retryDiagnostic.StatusCode
+			}
+			return command, nil
+		}
+		var diagnostic *deepSeekIntentError
+		if !errors.As(attemptErr, &diagnostic) || !diagnostic.Retryable || attempt == 2 {
+			return larkCommand{}, finalizeDeepSeekFailure(attemptErr, attempt, time.Since(started))
+		}
+		retryDiagnostic = diagnostic
+		timer := time.NewTimer(deepSeekRetryDelay)
+		select {
+		case <-parseCtx.Done():
+			timer.Stop()
+			return larkCommand{}, finalizeDeepSeekFailure(attemptErr, attempt, time.Since(started))
+		case <-timer.C:
+		}
+	}
+	return larkCommand{}, finalizeDeepSeekFailure(deepSeekFailure("transport", 0, true), 2, time.Since(started))
+}
+
+func (p *deepSeekIntentParser) attempt(ctx context.Context, body []byte) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return larkCommand{}, errDeepSeekIntent
+		return "", deepSeekFailure("request", 0, false)
 	}
 	request.Header.Set("Authorization", "Bearer "+p.apiKey)
 	request.Header.Set("Content-Type", "application/json")
 
 	response, err := p.client.Do(request)
 	if err != nil {
-		return larkCommand{}, errDeepSeekIntent
+		return "", deepSeekFailure("transport", 0, true)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return larkCommand{}, errDeepSeekIntent
+		retryable := response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError
+		return "", deepSeekFailure("http_status", response.StatusCode, retryable)
 	}
 
 	var completion struct {
@@ -133,37 +219,68 @@ func (p *deepSeekIntentParser) Parse(ctx context.Context, input string) (larkCom
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, deepSeekResponseMaxBytes))
 	if err := decoder.Decode(&completion); err != nil || len(completion.Choices) == 0 {
-		return larkCommand{}, errDeepSeekIntent
+		return "", deepSeekFailure("response_decode", 0, false)
 	}
 	choice := completion.Choices[0]
 	if choice.FinishReason != "stop" || strings.TrimSpace(choice.Message.Content) == "" {
-		return larkCommand{}, errDeepSeekIntent
+		return "", deepSeekFailure("finish_reason", 0, false)
 	}
-	return deepSeekResultCommand(choice.Message.Content)
+	return choice.Message.Content, nil
+}
+
+type deepSeekGroupBy []string
+
+func (group *deepSeekGroupBy) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*group = nil
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal(data, &values); err == nil {
+		*group = values
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	if value == "" || value == larkGroupNone {
+		*group = nil
+	} else {
+		*group = []string{value}
+	}
+	return nil
 }
 
 func deepSeekResultCommand(content string) (larkCommand, error) {
 	var result struct {
-		Intent          string `json:"intent"`
-		Keyword         string `json:"keyword"`
-		Metric          string `json:"metric"`
-		GroupBy         string `json:"group_by"`
-		MovementType    string `json:"movement_type"`
-		TimeRange       string `json:"time_range"`
-		Days            int    `json:"days"`
-		Sort            string `json:"sort"`
-		Limit           int    `json:"limit"`
-		ProductKeyword  string `json:"product_keyword"`
-		ShopKeyword     string `json:"shop_keyword"`
-		OperatorKeyword string `json:"operator_keyword"`
+		Intent          string          `json:"intent"`
+		Keyword         string          `json:"keyword"`
+		Domain          string          `json:"domain"`
+		Metric          string          `json:"metric"`
+		Operation       string          `json:"operation"`
+		GroupBy         deepSeekGroupBy `json:"group_by"`
+		MovementType    string          `json:"movement_type"`
+		TimeRange       string          `json:"time_range"`
+		Days            int             `json:"days"`
+		DateFrom        string          `json:"date_from"`
+		DateTo          string          `json:"date_to"`
+		TimeBucket      string          `json:"time_bucket"`
+		CompareTo       string          `json:"compare_to"`
+		Sort            string          `json:"sort"`
+		Limit           int             `json:"limit"`
+		Presentation    string          `json:"presentation"`
+		ProductKeyword  string          `json:"product_keyword"`
+		ShopKeyword     string          `json:"shop_keyword"`
+		OperatorKeyword string          `json:"operator_keyword"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(content))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&result); err != nil {
-		return larkCommand{}, errDeepSeekIntent
+		return larkCommand{}, deepSeekFailure("plan_decode", 0, false)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return larkCommand{}, errDeepSeekIntent
+		return larkCommand{}, deepSeekFailure("plan_decode", 0, false)
 	}
 
 	result.Intent = strings.TrimSpace(result.Intent)
@@ -172,68 +289,62 @@ func deepSeekResultCommand(content string) (larkCommand, error) {
 		len([]rune(result.ProductKeyword)) > larkKeywordMaxRunes ||
 		len([]rune(result.ShopKeyword)) > larkKeywordMaxRunes ||
 		len([]rune(result.OperatorKeyword)) > larkKeywordMaxRunes {
-		return larkCommand{}, errDeepSeekIntent
+		return larkCommand{}, deepSeekFailure("plan_validate", 0, false)
 	}
-	hasAnalyticsFields := result.Metric != "" || result.GroupBy != "" || result.MovementType != "" ||
-		result.TimeRange != "" || result.Days != 0 || result.Sort != "" || result.Limit != 0 ||
+	hasAnalyticsFields := result.Domain != "" || result.Metric != "" || result.Operation != "" || len(result.GroupBy) != 0 ||
+		result.MovementType != "" || result.TimeRange != "" || result.Days != 0 || result.DateFrom != "" || result.DateTo != "" ||
+		result.TimeBucket != "" || result.CompareTo != "" || result.Sort != "" || result.Limit != 0 || result.Presentation != "" ||
 		result.ProductKeyword != "" || result.ShopKeyword != "" || result.OperatorKeyword != ""
 	if result.Intent != "analytics" && hasAnalyticsFields {
-		return larkCommand{}, errDeepSeekIntent
+		return larkCommand{}, deepSeekFailure("plan_validate", 0, false)
 	}
 
+	simple := func(action string, name string, keywordAllowed bool, keywordRequired bool) (larkCommand, error) {
+		if (!keywordAllowed && result.Keyword != "") || (keywordRequired && result.Keyword == "") {
+			return larkCommand{}, deepSeekFailure("plan_validate", 0, false)
+		}
+		return larkCommand{Action: action, Name: name, Keyword: result.Keyword}, nil
+	}
 	switch result.Intent {
 	case "inventory":
-		if result.Keyword == "" {
-			return larkCommand{}, errDeepSeekIntent
-		}
-		return larkCommand{Action: larkActionInventory, Name: "自然语言·查库存", Keyword: result.Keyword}, nil
+		return simple(larkActionInventory, "自然语言·查库存", true, true)
 	case "low_stock":
-		return larkCommand{Action: larkActionLowStock, Name: "自然语言·低库存", Keyword: result.Keyword}, nil
+		return simple(larkActionLowStock, "自然语言·低库存", true, false)
 	case "out_of_stock":
-		return larkCommand{Action: larkActionOutOfStock, Name: "自然语言·缺货清单", Keyword: result.Keyword}, nil
+		return simple(larkActionOutOfStock, "自然语言·缺货清单", true, false)
 	case "inventory_summary":
-		if result.Keyword != "" {
-			return larkCommand{}, errDeepSeekIntent
-		}
-		return larkCommand{Action: larkActionSummary, Name: "自然语言·库存概览"}, nil
+		return simple(larkActionSummary, "自然语言·库存概览", false, false)
 	case "movements":
-		return larkCommand{Action: larkActionMovements, Name: "自然语言·查流水", Keyword: result.Keyword}, nil
+		return simple(larkActionMovements, "自然语言·查流水", true, false)
 	case "today_changes":
-		if result.Keyword != "" {
-			return larkCommand{}, errDeepSeekIntent
-		}
-		return larkCommand{Action: larkActionTodayChanges, Name: "自然语言·今日变动"}, nil
+		return simple(larkActionTodayChanges, "自然语言·今日变动", false, false)
 	case "analytics":
-		if result.Keyword != "" {
-			return larkCommand{}, errDeepSeekIntent
+		if result.Keyword != "" || len(result.GroupBy) > 2 {
+			return larkCommand{}, deepSeekFailure("plan_validate", 0, false)
 		}
-		plan, err := normalizeLarkAnalyticsPlan(larkAnalyticsPlan{
-			Metric:          result.Metric,
-			GroupBy:         result.GroupBy,
-			MovementType:    result.MovementType,
-			TimeRange:       result.TimeRange,
-			Days:            result.Days,
-			Sort:            result.Sort,
-			Limit:           result.Limit,
-			ProductKeyword:  result.ProductKeyword,
-			ShopKeyword:     result.ShopKeyword,
-			OperatorKeyword: result.OperatorKeyword,
-		})
+		plan := larkAnalyticsPlan{
+			Domain: result.Domain, Metric: result.Metric, Operation: result.Operation,
+			MovementType: result.MovementType, TimeRange: result.TimeRange, Days: result.Days,
+			DateFrom: result.DateFrom, DateTo: result.DateTo, TimeBucket: result.TimeBucket,
+			CompareTo: result.CompareTo, Sort: result.Sort, Limit: result.Limit, Presentation: result.Presentation,
+			ProductKeyword: result.ProductKeyword, ShopKeyword: result.ShopKeyword, OperatorKeyword: result.OperatorKeyword,
+		}
+		if len(result.GroupBy) > 0 {
+			plan.GroupBy = result.GroupBy[0]
+		}
+		if len(result.GroupBy) > 1 {
+			plan.GroupBy2 = result.GroupBy[1]
+		}
+		plan, err := normalizeLarkAnalyticsPlan(plan)
 		if err != nil {
-			return larkCommand{}, errDeepSeekIntent
+			return larkCommand{}, deepSeekFailure("plan_validate", 0, false)
 		}
 		return larkCommand{Action: larkActionAnalytics, Name: "自然语言·统计查询", Analytics: &plan}, nil
 	case "help":
-		if result.Keyword != "" {
-			return larkCommand{}, errDeepSeekIntent
-		}
-		return larkCommand{Action: larkActionHelp, Name: "自然语言·帮助"}, nil
+		return simple(larkActionHelp, "自然语言·帮助", false, false)
 	case "unknown":
-		if result.Keyword != "" {
-			return larkCommand{}, errDeepSeekIntent
-		}
-		return larkCommand{Action: larkActionUnknown, Name: "自然语言·未识别"}, nil
+		return simple(larkActionUnknown, "自然语言·未识别", false, false)
 	default:
-		return larkCommand{}, fmt.Errorf("%w: unsupported intent", errDeepSeekIntent)
+		return larkCommand{}, deepSeekFailure("plan_validate", 0, false)
 	}
 }

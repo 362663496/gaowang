@@ -69,3 +69,34 @@ func Test_Migrate_copies_shared_permissions_once_for_existing_staff(t *testing.T
 		t.Fatalf("grants after repeat migration = %+v, want only staff B", counts)
 	}
 }
+
+func Test_Migrate_preserves_legacy_product_sale_column(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := Migrate(database); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+	if err := database.Exec("ALTER TABLE products ADD COLUMN default_sale_cents integer NOT NULL DEFAULT 0").Error; err != nil {
+		t.Fatalf("add legacy sale column: %v", err)
+	}
+	product := models.Product{Name: "Tea", Code: "TEA"}
+	if err := database.Create(&product).Error; err != nil {
+		t.Fatalf("seed product: %v", err)
+	}
+	if err := database.Exec("UPDATE products SET default_sale_cents = ? WHERE id = ?", 321, product.ID).Error; err != nil {
+		t.Fatalf("seed legacy sale value: %v", err)
+	}
+
+	if err := Migrate(database); err != nil {
+		t.Fatalf("repeat migrate: %v", err)
+	}
+	var saleCents int64
+	if err := database.Raw("SELECT default_sale_cents FROM products WHERE id = ?", product.ID).Scan(&saleCents).Error; err != nil {
+		t.Fatalf("load legacy sale value: %v", err)
+	}
+	if saleCents != 321 {
+		t.Fatalf("legacy sale cents = %d, want 321", saleCents)
+	}
+}

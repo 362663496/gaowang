@@ -1,20 +1,25 @@
 "use client";
 
+import { DeleteOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Col, Flex, Form, Input, Row, Select, Table, Tag, type TableProps } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
+import { useSession } from "@/components/layout/session-context";
 import { initialPagination, tablePagination } from "@/features/pagination";
 import type { Paginated, User } from "@/features/types";
 import { createUser, type CreateUserInput } from "@/features/users/create-user";
-import { apiGet } from "@/lib/api";
+import { apiGet, request } from "@/lib/api";
 
 export default function UsersPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  const { user, hasPermission } = useSession();
+  const canDelete = hasPermission("user.delete");
   const [form] = Form.useForm<CreateUserInput>();
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingID, setDeletingID] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(initialPagination);
 
@@ -53,11 +58,51 @@ export default function UsersPage() {
     }
   }
 
+  function confirmDelete(target: User) {
+    modal.confirm({
+      title: `确认删除用户“${target.name}”？`,
+      content: "删除后将停用账号并撤销全部会话与权限，历史流水和审计记录会保留，用户名和邮箱不能再次使用。",
+      okText: "确认删除",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      async onOk() {
+        setDeletingID(target.id);
+        setError("");
+        try {
+          await request<void>(`/users/${target.id}`, { method: "DELETE" });
+          message.success("用户已删除");
+          await loadUsers();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "删除用户失败");
+        } finally {
+          setDeletingID(null);
+        }
+      },
+    });
+  }
+
   const columns: TableProps<User>["columns"] = [
     { title: "姓名", dataIndex: "name", width: 160, render: (value: string) => <strong>{value}</strong> },
     { title: "邮箱", dataIndex: "email", width: 260 },
     { title: "角色", dataIndex: "role", width: 110, render: (value: User["role"]) => <Tag color={value === "admin" ? "purple" : "blue"}>{value}</Tag> },
     { title: "ID", dataIndex: "id", render: (value: string) => <span className="mono muted">{value}</span> },
+    {
+      title: "操作",
+      key: "actions",
+      fixed: "right",
+      width: 100,
+      render: (_, target) => canDelete && target.id !== user?.id ? (
+        <Button
+          danger
+          disabled={deletingID !== null}
+          icon={<DeleteOutlined />}
+          loading={deletingID === target.id}
+          size="small"
+          type="text"
+          onClick={() => confirmDelete(target)}
+        >删除</Button>
+      ) : null,
+    },
   ];
 
   return (
@@ -86,7 +131,7 @@ export default function UsersPage() {
           loading={loading}
           pagination={tablePagination(pagination, setPage)}
           rowKey="id"
-          scroll={{ x: 760 }}
+          scroll={{ x: 860 }}
         />
       </Card>
     </Flex>

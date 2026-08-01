@@ -76,21 +76,22 @@ export default function DashboardPage() {
     { title: "商品", dataIndex: "Product", width: 240, render: (_, movement) => <ProductIdentity product={movement.Product} /> },
     { title: "数量", dataIndex: "QuantityDelta", width: 100, render: formatQuantity },
     {
-      title: "金额",
-      width: 130,
-      render: (_, movement) => formatMoney(movement.RevenueCents || movement.PurchaseAmountCents || movement.CostAmountCents),
+      title: "采购/成本金额",
+      width: 150,
+      render: (_, movement) => formatMoney(movement.Type === "inbound" ? movement.PurchaseAmountCents : movement.CostAmountCents),
     },
     { title: "时间", dataIndex: "CreatedAt", width: 180, render: (value: string) => <span className="muted">{formatDateTime(value)}</span> },
   ];
 
   return (
     <Flex gap={20} vertical>
-      <PageHeader description="销售、毛利、库存风险和最近库存流水。" title="仪表盘" />
+      <PageHeader description="销售数量、估算采购成本、库存风险和最近库存流水。" title="仪表盘" />
       <Row gutter={[12, 12]}>
         {canSales && data.summary ? (
           <>
-            <Col lg={6} sm={12} xs={24}><Metric icon={<ArrowUpOutlined />} label="累计销售额" value={formatMoney(data.summary.revenue_cents)} /></Col>
-            <Col lg={6} sm={12} xs={24}><Metric icon={<ArrowDownOutlined />} label="累计毛利" value={formatMoney(data.summary.gross_profit_cents)} /></Col>
+            <Col lg={6} sm={12} xs={24}><Metric icon={<ArrowUpOutlined />} label="累计销售数量" value={formatQuantity(data.summary.quantity_sold)} /></Col>
+            <Col lg={6} sm={12} xs={24}><Metric icon={<ArrowDownOutlined />} label="销售出库笔数" value={formatQuantity(data.summary.movement_count)} /></Col>
+            <Col lg={6} sm={12} xs={24}><Metric icon={<ArrowDownOutlined />} label="估算采购成本" value={formatMoney(data.summary.cost_cents)} /></Col>
           </>
         ) : null}
         {canInventory ? (

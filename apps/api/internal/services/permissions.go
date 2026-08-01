@@ -36,6 +36,7 @@ const (
 	PermSettingUpdate          = "setting.update"
 	PermUserRead               = "user.read"
 	PermUserCreate             = "user.create"
+	PermUserDelete             = "user.delete"
 	PermPermissionRead         = "permission.read"
 	PermPermissionUpdate       = "permission.update"
 )
@@ -75,6 +76,7 @@ var permissionCatalog = []PermissionDef{
 	{Key: PermSettingUpdate, Module: "setting", ModuleLabel: "设置", ActionLabel: "修改", StaffAssignable: true, Requires: []string{PermSettingRead}},
 	{Key: PermUserRead, Module: "user", ModuleLabel: "用户", ActionLabel: "查看", StaffAssignable: false},
 	{Key: PermUserCreate, Module: "user", ModuleLabel: "用户", ActionLabel: "新建", StaffAssignable: false, Requires: []string{PermUserRead}},
+	{Key: PermUserDelete, Module: "user", ModuleLabel: "用户", ActionLabel: "删除", StaffAssignable: false, Requires: []string{PermUserRead}},
 	{Key: PermPermissionRead, Module: "permission", ModuleLabel: "权限", ActionLabel: "查看", StaffAssignable: false},
 	{Key: PermPermissionUpdate, Module: "permission", ModuleLabel: "权限", ActionLabel: "修改", StaffAssignable: false, Requires: []string{PermPermissionRead}},
 }

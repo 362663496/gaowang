@@ -105,16 +105,14 @@ export default function StockMovementsPage() {
     { title: "商品", dataIndex: "Product", width: 280, render: (product: Product) => <ProductIdentity product={product} /> },
     { title: "店铺", dataIndex: ["Shop", "Name"], width: 130, render: (value?: string) => value ?? "-" },
     { title: "数量", dataIndex: "QuantityDelta", width: 100, render: formatQuantity },
-    { title: "收入", dataIndex: "RevenueCents", width: 120, render: formatMoney },
     {
-      title: "成本",
-      width: 120,
+      title: "采购/成本金额",
+      width: 140,
       render: (_, movement) => formatMoney(movement.CostAmountCents || movement.PurchaseAmountCents),
     },
-    { title: "毛利", dataIndex: "GrossProfitCents", width: 120, render: formatMoney },
+    { title: "日期", dataIndex: "CreatedAt", width: 180, render: (value: string) => <span className="muted">{formatDateTime(value)}</span> },
     { title: "备注", dataIndex: "Reason", width: 180, ellipsis: true, render: (value: string) => <span className="muted">{value || "-"}</span> },
     { title: "原操作人", dataIndex: ["Operator", "name"], width: 130, render: (value?: string) => value ?? "-" },
-    { title: "原时间", dataIndex: "CreatedAt", width: 180, render: (value: string) => <span className="muted">{formatDateTime(value)}</span> },
     {
       title: "修订",
       width: 190,
@@ -221,7 +219,7 @@ export default function StockMovementsPage() {
           loading={loading}
           pagination={tablePagination(pagination, setPage)}
           rowKey="ID"
-          scroll={{ x: canUpdate ? 1780 : 1680 }}
+          scroll={{ x: canUpdate ? 1540 : 1440 }}
         />
       </Card>
       {editing ? (
@@ -286,7 +284,7 @@ function MovementEditor({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload),
             });
-            message.success("流水已修订，库存与报表已同步");
+            message.success("流水已修订，库存、成本与报表已同步");
             onSaved();
           } catch (err) {
             const text = err instanceof Error ? err.message : "保存失败";
@@ -396,11 +394,7 @@ function MovementImpactPreview({ movement, preview, shops }: { movement: StockMo
     { key: "stock", label: "当前 / 结果库存", children: `${formatQuantity(preview.impact.current_quantity)} → ${formatQuantity(preview.impact.result_quantity)}` },
     { key: "value", label: "当前 / 结果库存金额", children: `${formatMoney(preview.impact.current_inventory_value_cents)} → ${formatMoney(preview.impact.result_inventory_value_cents)}` },
     ...(movement.Type === "inbound" ? [{ key: "purchase", label: "采购金额变化", children: formatMoney(preview.impact.purchase_amount_delta_cents) }] : []),
-    ...(movement.Type === "sales_outbound" ? [
-      { key: "revenue", label: "收入变化", children: formatMoney(preview.impact.revenue_delta_cents) },
-      { key: "cost", label: "成本变化", children: formatMoney(preview.impact.cost_delta_cents) },
-      { key: "gross", label: "毛利变化", children: formatMoney(preview.impact.gross_profit_delta_cents) },
-    ] : []),
+    ...(movement.Type !== "inbound" ? [{ key: "cost", label: "成本金额变化", children: formatMoney(preview.impact.cost_delta_cents) }] : []),
   ];
   return (
     <Flex gap={12} style={{ marginTop: 16 }} vertical>

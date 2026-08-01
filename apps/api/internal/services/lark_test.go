@@ -81,7 +81,7 @@ func Test_Lark_query_filters_sorts_and_limits_results(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query inventory: %v", err)
 	}
-	if len(rows) != 5 || !more || rows[0].Code != "SKU-A" || rows[4].Code != "SKU-E" {
+	if len(rows) != 7 || more || rows[0].Code != "SKU-A" || rows[6].Code != "SKU-G" {
 		t.Fatalf("inventory rows = %+v more=%t", rows, more)
 	}
 
@@ -100,7 +100,7 @@ func Test_Lark_query_filters_sorts_and_limits_results(t *testing.T) {
 	}
 
 	rows, more, err = queryLarkProducts(db, larkCommand{Action: larkActionLowStock})
-	if err != nil || !more || len(rows) != 5 {
+	if err != nil || more || len(rows) != 6 {
 		t.Fatalf("low-stock rows = %+v more=%t err=%v", rows, more, err)
 	}
 
@@ -110,10 +110,10 @@ func Test_Lark_query_filters_sorts_and_limits_results(t *testing.T) {
 	}
 
 	rows, more, err = queryLarkProducts(db, larkCommand{Action: larkActionValueRanking})
-	if err != nil || !more || len(rows) != 5 {
+	if err != nil || more || len(rows) != 6 {
 		t.Fatalf("value-ranking rows = %+v more=%t err=%v", rows, more, err)
 	}
-	wantCodes := []string{"SKU-D", "SKU-E", "SKU-C", "SKU-F", "SKU-B"}
+	wantCodes := []string{"SKU-D", "SKU-E", "SKU-C", "SKU-F", "SKU-B", "SKU-G"}
 	for index, want := range wantCodes {
 		if rows[index].Code != want {
 			t.Fatalf("value-ranking row %d = %s, want %s", index, rows[index].Code, want)
@@ -137,7 +137,7 @@ func Test_Lark_help_uses_natural_language_examples_for_all_features(t *testing.T
 
 func Test_Lark_cards_show_purchase_price_prominent_quantity_and_stock_transition(t *testing.T) {
 	product := models.Product{
-		Name: "绿茶", Code: "TEA-1", DefaultPurchaseCents: 123, DefaultSaleCents: 456,
+		Name: "绿茶", Code: "TEA-1", DefaultPurchaseCents: 123,
 		LowStockThreshold: 5, Enabled: true,
 	}
 	productCard, err := larkProductCard("商品详情", "blue", larkProductRow{Product: product, Quantity: 3}, "img_test")
@@ -243,6 +243,26 @@ func Test_Lark_audit_records_query_without_actor(t *testing.T) {
 	}
 }
 
+func Test_Lark_inventory_change_card_displays_optional_note(t *testing.T) {
+	card, err := larkInventoryChangeCard(InventoryChange{
+		Product: models.Product{Name: "绿茶", Code: "TEA"},
+		Movement: models.StockMovement{
+			Type:          models.MovementTypeInbound,
+			QuantityDelta: 2,
+			Reason:        "到货检查完成",
+			Operator:      models.User{Name: "操作员"},
+			CreatedAt:     time.Date(2026, 8, 1, 1, 2, 3, 0, time.UTC),
+		},
+		QuantityAfter: 2,
+	}, "")
+	if err != nil {
+		t.Fatalf("build inventory change card: %v", err)
+	}
+	if !strings.Contains(card, "原因") || !strings.Contains(card, "到货检查完成") {
+		t.Fatalf("inventory change card missing note: %s", card)
+	}
+}
+
 func Test_Lark_audit_records_validated_analytics_plan_without_original_message(t *testing.T) {
 	db := newInventoryTestDB(t)
 	bot := larkBot{db: db}
@@ -270,6 +290,40 @@ func Test_Lark_audit_records_validated_analytics_plan_without_original_message(t
 	}
 	if _, exists := metadata["message"]; exists {
 		t.Fatalf("analytics audit stored original message: %+v", metadata)
+	}
+}
+
+func Test_Lark_AI_failure_cards_and_retry_audit_are_distinct_and_sanitized(t *testing.T) {
+	unavailable, err := larkAIUnavailableCard()
+	if err != nil || !strings.Contains(unavailable, "智能服务暂时异常") || !strings.Contains(unavailable, "稍后再试") {
+		t.Fatalf("unavailable card = %s err=%v", unavailable, err)
+	}
+	unsupported, err := larkAIUnsupportedCard()
+	if err != nil || !strings.Contains(unsupported, "没有理解清楚") || !strings.Contains(unsupported, "最多两个统计维度") || unsupported == unavailable {
+		t.Fatalf("unsupported card = %s err=%v", unsupported, err)
+	}
+
+	db := newInventoryTestDB(t)
+	bot := larkBot{db: db}
+	bot.recordAudit(
+		larktypes.NormalizedMessage{MessageID: "om_retry", ChatID: "oc_test", UserID: "ou_test"},
+		larkCommand{Action: larkActionSummary, Name: "自然语言·库存概览", AIAttempts: 2, AIElapsedMS: 123},
+	)
+	var audit models.AuditLog
+	if err := db.First(&audit).Error; err != nil {
+		t.Fatalf("load retry audit: %v", err)
+	}
+	var metadata map[string]string
+	if err := json.Unmarshal(audit.Metadata, &metadata); err != nil {
+		t.Fatalf("decode retry metadata: %v", err)
+	}
+	if metadata["ai_attempts"] != "2" || metadata["ai_elapsed_ms"] != "123" {
+		t.Fatalf("retry metadata = %+v", metadata)
+	}
+	for _, forbidden := range []string{"api_key", "authorization", "message", "response"} {
+		if _, exists := metadata[forbidden]; exists {
+			t.Fatalf("retry metadata contains %q: %+v", forbidden, metadata)
+		}
 	}
 }
 

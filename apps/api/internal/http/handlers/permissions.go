@@ -33,7 +33,7 @@ type permissionUserResponse struct {
 func (h PermissionHandler) Get(c *gin.Context) {
 	catalog := services.PermissionCatalog()
 	var staff []models.User
-	if err := h.DB.Where("role = ?", models.RoleStaff).Order("name asc").Order("email asc").Order("id asc").Find(&staff).Error; err != nil {
+	if err := h.DB.Where("role = ? AND deleted_at IS NULL", models.RoleStaff).Order("name asc").Order("email asc").Order("id asc").Find(&staff).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to load permissions")
 		return
 	}
@@ -89,7 +89,7 @@ func (h PermissionHandler) Update(c *gin.Context) {
 		return
 	}
 	var user models.User
-	if err := h.DB.First(&user, "id = ?", userID).Error; err != nil {
+	if err := h.DB.Where("deleted_at IS NULL").First(&user, "id = ?", userID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeError(c, http.StatusNotFound, "USER_NOT_FOUND", "用户不存在")
 			return

@@ -28,9 +28,7 @@ type movementResponse struct {
 	Shop                *models.Shop
 	QuantityDelta       int64
 	PurchaseAmountCents int64
-	RevenueCents        int64
 	CostAmountCents     int64
-	GrossProfitCents    int64
 	Reason              string
 	OperatorID          uuid.UUID
 	Operator            userResponse
@@ -204,8 +202,7 @@ func newMovementResponse(movement models.StockMovement) movementResponse {
 		ID: movement.ID, Type: movement.Type, ProductID: movement.ProductID, Product: movement.Product,
 		ShopID: movement.ShopID, Shop: movement.Shop, QuantityDelta: movement.QuantityDelta,
 		PurchaseAmountCents: movement.PurchaseAmountCents,
-		RevenueCents:        movement.RevenueCents, CostAmountCents: movement.CostAmountCents,
-		GrossProfitCents: movement.GrossProfitCents, Reason: movement.Reason,
+		CostAmountCents:     movement.CostAmountCents, Reason: movement.Reason,
 		OperatorID: movement.OperatorID,
 		Operator:   userResponse{ID: movement.Operator.ID, Name: movement.Operator.Name, Email: movement.Operator.Email, Role: movement.Operator.Role},
 		Revision:   movement.Revision, LastEditedByID: movement.LastEditedByID,

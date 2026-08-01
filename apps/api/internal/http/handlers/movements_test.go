@@ -20,7 +20,7 @@ func Test_MovementRoutes_preview_update_and_mark_latest(t *testing.T) {
 	db := newMovementTestDB(t)
 	admin := models.User{Name: "Admin", Email: "movement-admin@example.com", PasswordHash: "secret-hash", Role: models.RoleAdmin, Enabled: true}
 	product := models.Product{
-		Name: "Tea", Code: "MOVE-TEA", DefaultPurchaseCents: 100, DefaultSaleCents: 250, Enabled: true,
+		Name: "Tea", Code: "MOVE-TEA", DefaultPurchaseCents: 100, Enabled: true,
 	}
 	for _, value := range []any{&admin, &product} {
 		if err := db.Create(value).Error; err != nil {
@@ -41,6 +41,9 @@ func Test_MovementRoutes_preview_update_and_mark_latest(t *testing.T) {
 	list := doJSON(t, router, http.MethodGet, "/api/v1/stock-movements", token, nil)
 	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), "secret-hash") {
 		t.Fatalf("list status/body = %d %s", list.Code, list.Body.String())
+	}
+	if strings.Contains(list.Body.String(), "Revenue"+"Cents") || strings.Contains(list.Body.String(), "GrossProfit"+"Cents") {
+		t.Fatalf("movement list exposed removed finance fields: %s", list.Body.String())
 	}
 	var listBody struct {
 		Items []struct {
@@ -149,7 +152,7 @@ func Test_MovementList_filters_created_at_by_shanghai_day_and_uses_current_produ
 	db := newMovementTestDB(t)
 	admin := models.User{Name: "Admin", Email: "movement-filter@example.com", PasswordHash: "hash", Role: models.RoleAdmin, Enabled: true}
 	product := models.Product{
-		Name: "Tea", Code: "MOVE-FILTER", DefaultPurchaseCents: 120, DefaultSaleCents: 300, Enabled: true,
+		Name: "Tea", Code: "MOVE-FILTER", DefaultPurchaseCents: 120, Enabled: true,
 	}
 	shop := models.Shop{Name: "Main", Enabled: true}
 	for _, value := range []any{&admin, &product, &shop} {
@@ -164,8 +167,8 @@ func Test_MovementList_filters_created_at_by_shanghai_day_and_uses_current_produ
 	}
 	start := models.StockMovement{
 		Type: models.MovementTypeSalesOutbound, ProductID: product.ID, ShopID: &shop.ID, QuantityDelta: -2,
-		RevenueCents: 1, CostAmountCents: 1, GrossProfitCents: 0,
-		OperatorID: admin.ID, CreatedAt: time.Date(2026, 6, 30, 16, 0, 0, 0, time.UTC),
+		CostAmountCents: 1,
+		OperatorID:      admin.ID, CreatedAt: time.Date(2026, 6, 30, 16, 0, 0, 0, time.UTC),
 	}
 	end := models.StockMovement{
 		Type: models.MovementTypeAdjustment, ProductID: product.ID, QuantityDelta: 3,
@@ -197,9 +200,7 @@ func Test_MovementList_filters_created_at_by_shanghai_day_and_uses_current_produ
 			ID                  string `json:"ID"`
 			Type                string `json:"Type"`
 			PurchaseAmountCents int64  `json:"PurchaseAmountCents"`
-			RevenueCents        int64  `json:"RevenueCents"`
 			CostAmountCents     int64  `json:"CostAmountCents"`
-			GrossProfitCents    int64  `json:"GrossProfitCents"`
 			IsLatest            bool   `json:"IsLatest"`
 		} `json:"items"`
 	}
@@ -212,8 +213,11 @@ func Test_MovementList_filters_created_at_by_shanghai_day_and_uses_current_produ
 	if body.Items[0].CostAmountCents != 360 || body.Items[0].IsLatest {
 		t.Fatalf("adjustment projection/latest = %+v, want cost 360 and not latest", body.Items[0])
 	}
-	if body.Items[1].RevenueCents != 600 || body.Items[1].CostAmountCents != 240 || body.Items[1].GrossProfitCents != 360 {
-		t.Fatalf("sale projection = %+v, want 600/240/360", body.Items[1])
+	if body.Items[1].CostAmountCents != 240 {
+		t.Fatalf("sale projection = %+v, want cost 240", body.Items[1])
+	}
+	if strings.Contains(response.Body.String(), "Revenue"+"Cents") || strings.Contains(response.Body.String(), "GrossProfit"+"Cents") {
+		t.Fatalf("movement response exposed removed finance fields: %s", response.Body.String())
 	}
 
 	combined := doJSON(t, router, http.MethodGet,

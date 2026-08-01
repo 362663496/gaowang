@@ -10,9 +10,9 @@
 
 ## Data Representation
 
-- Money is integer cents in `int64` fields. `Product.DefaultPurchaseCents` and `Product.DefaultSaleCents` are the only runtime price sources; never use floating point for stored or calculated money.
+- Money is integer cents in `int64` fields. `Product.DefaultPurchaseCents` is the runtime price source; never use floating point for stored or calculated money.
 - Stock quantities are `int64`. Movement direction is represented by signed `QuantityDelta`.
-- Nullable database values use pointers, for example `ShopID`, `SaleUnitCents`, and `FinishedAt`.
+- Nullable database values use pointers, for example `ShopID` and `FinishedAt`.
 - Persisted enum values use typed strings; JSON metadata uses PostgreSQL `jsonb` via `datatypes.JSON`.
 - Let GORM map Go names to plural snake-case tables and snake-case columns unless an existing contract requires an explicit tag.
 
@@ -24,9 +24,10 @@
 - Lock the product row first, reject `ArchivedAt != nil`, then lock the snapshot. Product archive uses the same product-row → snapshot order so a concurrent write cannot land after archive.
 - Lock an existing snapshot with `clause.Locking{Strength: "UPDATE"}` before changing stock.
 - Normal stock operations append a `StockMovement`. Corrections may update only that product's latest movement through `InventoryService.UpdateMovement`; never update a movement directly from a handler and never delete one.
+- Inbound and sales-outbound may store a trimmed optional note of at most 500 Unicode characters in `StockMovement.Reason`; adjustment continues to require a reason.
 - `StockMovement.ShopID` is optional metadata. Inbound may record it, but snapshots remain globally keyed only by `ProductID`; do not infer per-shop stock from movements.
 - Reject outbound or negative adjustments that would make stock negative with `ErrInsufficientStock`.
-- Recalculate snapshot value as `Quantity × Product.DefaultPurchaseCents` on every stock mutation. The legacy moving-average and movement price/amount columns remain compatibility mirrors only; inventory, movement, export, dashboard, and report reads derive amounts from current product prices.
+- Recalculate snapshot value as `Quantity × Product.DefaultPurchaseCents` on every stock mutation. Legacy product sale-price and movement finance columns remain in upgraded databases for rollback but are intentionally unmapped at runtime; inventory, movement, export, dashboard, and report reads derive purchase or cost amounts from the current purchase price.
 - Latest-movement correction locks product → snapshot → movement, checks `revision`, reverses only the saved `QuantityDelta`, reapplies the shared transition with current product prices, and writes snapshot, movement, editor fields, and `movement.updated` audit in one transaction.
 
 References: `internal/services/inventory.go` and `internal/services/inventory_test.go`.

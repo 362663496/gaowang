@@ -52,7 +52,7 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	user := createReportUser(t, db)
 	product := models.Product{
 		Name: "Tea", Code: "TEA", ImagePath: "/uploads/tea.png",
-		DefaultPurchaseCents: 100, DefaultSaleCents: 250, Enabled: true,
+		DefaultPurchaseCents: 100, Enabled: true,
 	}
 	shop := models.Shop{Name: "Main", Enabled: true}
 	if err := db.Create(&product).Error; err != nil {
@@ -90,8 +90,8 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	if !updated.CreatedAt.Equal(createdAt) {
 		t.Fatalf("updated sale date = %s, want %s", updated.CreatedAt, createdAt)
 	}
-	if err := db.Model(&product).Updates(map[string]any{"default_purchase_cents": 120, "default_sale_cents": 300}).Error; err != nil {
-		t.Fatalf("change current product prices: %v", err)
+	if err := db.Model(&product).Update("default_purchase_cents", 120).Error; err != nil {
+		t.Fatalf("change current product purchase price: %v", err)
 	}
 	archivedAt := time.Now().UTC()
 	if err := db.Model(&product).Updates(map[string]any{"archived_at": archivedAt, "enabled": false}).Error; err != nil {
@@ -107,41 +107,47 @@ func Test_ReportEndpoints_group_sales_by_day_product_and_shop(t *testing.T) {
 	shopResponse := getReport(t, router, token, "/api/v1/reports/shop-ranking")
 
 	// Then
-	assertSalesSummaryResponse(t, summaryResponse, 900, 360, 540)
-	assertTrendResponse(t, trendResponse, createdAt.Format("2006-01-02"), 900, 540)
-	assertProductRankingResponse(t, productResponse, "Tea", "/uploads/tea.png", 900, 3, true)
-	assertShopRankingResponse(t, shopResponse, "Main", 900, 3)
+	for _, response := range []*httptest.ResponseRecorder{summaryResponse, trendResponse, productResponse, shopResponse} {
+		if bytes.Contains(response.Body.Bytes(), []byte("revenue_"+"cents")) || bytes.Contains(response.Body.Bytes(), []byte("gross_profit_"+"cents")) {
+			t.Fatalf("report exposed removed finance fields: %s", response.Body.String())
+		}
+	}
+	assertSalesSummaryResponse(t, summaryResponse, 3, 1, 360)
+	assertTrendResponse(t, trendResponse, createdAt.Format("2006-01-02"), 3, 1, 360)
+	assertProductRankingResponse(t, productResponse, "Tea", "/uploads/tea.png", 360, 3, 1, true)
+	assertShopRankingResponse(t, shopResponse, "Main", 360, 3, 1)
 }
 
 type productRankingRow struct {
 	ProductName      string `json:"product_name"`
 	ProductImagePath string `json:"product_image_path"`
 	Archived         bool   `json:"archived"`
-	RevenueCents     int64  `json:"revenue_cents"`
-	GrossProfitCents int64  `json:"gross_profit_cents"`
+	CostCents        int64  `json:"cost_cents"`
 	QuantitySold     int64  `json:"quantity_sold"`
+	MovementCount    int64  `json:"movement_count"`
 }
 
 type summaryRow struct {
-	RevenueCents     int64 `json:"revenue_cents"`
-	CostCents        int64 `json:"cost_cents"`
-	GrossProfitCents int64 `json:"gross_profit_cents"`
+	QuantitySold  int64 `json:"quantity_sold"`
+	MovementCount int64 `json:"movement_count"`
+	CostCents     int64 `json:"cost_cents"`
 }
 
 type trendRow struct {
-	Day              string `json:"day"`
-	RevenueCents     int64  `json:"revenue_cents"`
-	GrossProfitCents int64  `json:"gross_profit_cents"`
+	Day           string `json:"day"`
+	QuantitySold  int64  `json:"quantity_sold"`
+	MovementCount int64  `json:"movement_count"`
+	CostCents     int64  `json:"cost_cents"`
 }
 
 type shopRankingRow struct {
-	ShopName         string `json:"shop_name"`
-	RevenueCents     int64  `json:"revenue_cents"`
-	QuantitySold     int64  `json:"quantity_sold"`
-	GrossProfitCents int64  `json:"gross_profit_cents"`
+	ShopName      string `json:"shop_name"`
+	CostCents     int64  `json:"cost_cents"`
+	QuantitySold  int64  `json:"quantity_sold"`
+	MovementCount int64  `json:"movement_count"`
 }
 
-func assertTrendResponse(t *testing.T, response *httptest.ResponseRecorder, day string, revenue int64, gross int64) {
+func assertTrendResponse(t *testing.T, response *httptest.ResponseRecorder, day string, quantity int64, count int64, cost int64) {
 	t.Helper()
 	if response.Code != http.StatusOK {
 		t.Fatalf("trend status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
@@ -155,12 +161,12 @@ func assertTrendResponse(t *testing.T, response *httptest.ResponseRecorder, day 
 	if len(body.Items) != 1 {
 		t.Fatalf("trend rows = %d, want 1; body = %s", len(body.Items), response.Body.String())
 	}
-	if body.Items[0].Day != day || body.Items[0].RevenueCents != revenue || body.Items[0].GrossProfitCents != gross {
-		t.Fatalf("trend row = %+v, want %s/%d/%d", body.Items[0], day, revenue, gross)
+	if body.Items[0].Day != day || body.Items[0].QuantitySold != quantity || body.Items[0].MovementCount != count || body.Items[0].CostCents != cost {
+		t.Fatalf("trend row = %+v, want %s quantity/count/cost %d/%d/%d", body.Items[0], day, quantity, count, cost)
 	}
 }
 
-func assertSalesSummaryResponse(t *testing.T, response *httptest.ResponseRecorder, revenue int64, cost int64, gross int64) {
+func assertSalesSummaryResponse(t *testing.T, response *httptest.ResponseRecorder, quantity int64, count int64, cost int64) {
 	t.Helper()
 	if response.Code != http.StatusOK {
 		t.Fatalf("summary status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
@@ -171,12 +177,12 @@ func assertSalesSummaryResponse(t *testing.T, response *httptest.ResponseRecorde
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode summary: %v", err)
 	}
-	if body.Summary.RevenueCents != revenue || body.Summary.CostCents != cost || body.Summary.GrossProfitCents != gross {
-		t.Fatalf("summary = %+v, want %d/%d/%d", body.Summary, revenue, cost, gross)
+	if body.Summary.QuantitySold != quantity || body.Summary.MovementCount != count || body.Summary.CostCents != cost {
+		t.Fatalf("summary = %+v, want quantity/count/cost %d/%d/%d", body.Summary, quantity, count, cost)
 	}
 }
 
-func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecorder, productName string, imagePath string, revenue int64, quantity int64, archived bool) {
+func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecorder, productName string, imagePath string, cost int64, quantity int64, count int64, archived bool) {
 	t.Helper()
 	if response.Code != http.StatusOK {
 		t.Fatalf("product status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
@@ -190,12 +196,12 @@ func assertProductRankingResponse(t *testing.T, response *httptest.ResponseRecor
 	if len(body.Items) != 1 {
 		t.Fatalf("product rows = %d, want 1; body = %s", len(body.Items), response.Body.String())
 	}
-	if body.Items[0].ProductName != productName || body.Items[0].ProductImagePath != imagePath || body.Items[0].RevenueCents != revenue || body.Items[0].QuantitySold != quantity || body.Items[0].Archived != archived {
-		t.Fatalf("product row = %+v, want %s/%s/%d/%d/archived=%t", body.Items[0], productName, imagePath, revenue, quantity, archived)
+	if body.Items[0].ProductName != productName || body.Items[0].ProductImagePath != imagePath || body.Items[0].CostCents != cost || body.Items[0].QuantitySold != quantity || body.Items[0].MovementCount != count || body.Items[0].Archived != archived {
+		t.Fatalf("product row = %+v, want %s/%s cost/quantity/count %d/%d/%d archived=%t", body.Items[0], productName, imagePath, cost, quantity, count, archived)
 	}
 }
 
-func assertShopRankingResponse(t *testing.T, response *httptest.ResponseRecorder, shopName string, revenue int64, quantity int64) {
+func assertShopRankingResponse(t *testing.T, response *httptest.ResponseRecorder, shopName string, cost int64, quantity int64, count int64) {
 	t.Helper()
 	if response.Code != http.StatusOK {
 		t.Fatalf("shop status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
@@ -209,8 +215,8 @@ func assertShopRankingResponse(t *testing.T, response *httptest.ResponseRecorder
 	if len(body.Items) != 1 {
 		t.Fatalf("shop rows = %d, want 1; body = %s", len(body.Items), response.Body.String())
 	}
-	if body.Items[0].ShopName != shopName || body.Items[0].RevenueCents != revenue || body.Items[0].QuantitySold != quantity {
-		t.Fatalf("shop row = %+v, want %s/%d/%d", body.Items[0], shopName, revenue, quantity)
+	if body.Items[0].ShopName != shopName || body.Items[0].CostCents != cost || body.Items[0].QuantitySold != quantity || body.Items[0].MovementCount != count {
+		t.Fatalf("shop row = %+v, want %s cost/quantity/count %d/%d/%d", body.Items[0], shopName, cost, quantity, count)
 	}
 }
 

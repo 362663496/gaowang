@@ -50,7 +50,7 @@ func (h AuthHandler) Login(c *gin.Context) {
 	}
 
 	var user models.User
-	err := h.DB.Where("enabled = ? AND (email = ? OR name = ?)", true, identifier, identifier).First(&user).Error
+	err := h.DB.Where("enabled = ? AND deleted_at IS NULL AND (email = ? OR name = ?)", true, identifier, identifier).First(&user).Error
 	if err != nil || !services.PasswordMatches(user.PasswordHash, req.Password) {
 		recordAuditForActor(c, h.DB, nil, "auth.login_failed", "auth", identifier, map[string]string{"login": identifier})
 		writeError(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")

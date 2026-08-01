@@ -58,7 +58,7 @@ func Test_Lark_movements_filter_sort_limit_and_render_each_product_image(t *test
 		}
 	}
 	base := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
-	for index := 0; index < 6; index++ {
+	for index := 0; index < 12; index++ {
 		movement := models.StockMovement{
 			Type:          models.MovementTypeInbound,
 			ProductID:     tea.ID,
@@ -83,7 +83,7 @@ func Test_Lark_movements_filter_sort_limit_and_render_each_product_image(t *test
 	if err != nil {
 		t.Fatalf("query movements: %v", err)
 	}
-	if len(movements) != 5 || !more || movements[0].QuantityDelta != 6 || movements[4].QuantityDelta != 2 {
+	if len(movements) != 10 || !more || movements[0].QuantityDelta != 12 || movements[9].QuantityDelta != 3 {
 		t.Fatalf("movements = %+v more=%t", movements, more)
 	}
 	for _, movement := range movements {
@@ -91,9 +91,9 @@ func Test_Lark_movements_filter_sort_limit_and_render_each_product_image(t *test
 			t.Fatalf("movement associations = %+v", movement)
 		}
 	}
-	card, err := larkMovementsCard(movements, more, []string{"img_1", "img_2", "img_3", "img_4", "img_5"})
-	if err != nil || strings.Count(card, `"img_key":"img_`) != 5 || strings.Count(card, `"tag":"hr"`) != 4 ||
-		!strings.Contains(card, "结果超过 5 条") || strings.Contains(card, "fit_horizontal") {
+	card, err := larkMovementsCard(movements, more, []string{"img_1", "img_2", "img_3", "img_4", "img_5", "img_6", "img_7", "img_8", "img_9", "img_10"})
+	if err != nil || strings.Count(card, `"img_key":"img_`) != 10 || strings.Count(card, `"tag":"hr"`) != 9 ||
+		!strings.Contains(card, "结果超过 10 条") || strings.Contains(card, "fit_horizontal") {
 		t.Fatalf("movement card = %s err=%v", card, err)
 	}
 }
@@ -144,7 +144,7 @@ func Test_Lark_today_sales_ranking_uses_shanghai_day_and_renders_each_product_im
 	}
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, larkLocation)
 	startUTC := time.Date(2026, 7, 30, 16, 0, 0, 0, time.UTC)
-	products := make([]models.Product, 7)
+	products := make([]models.Product, 12)
 	for index := range products {
 		products[index] = models.Product{
 			Name: "销售商品" + string(rune('A'+index)), Code: "SALE-" + string(rune('A'+index)),
@@ -187,22 +187,22 @@ func Test_Lark_today_sales_ranking_uses_shanghai_day_and_renders_each_product_im
 	}
 
 	rows, more, err := queryLarkTodaySalesRanking(db, now)
-	if err != nil || !more || len(rows) != 5 {
+	if err != nil || !more || len(rows) != 10 {
 		t.Fatalf("sales ranking rows = %+v more=%t err=%v", rows, more, err)
 	}
-	for index, want := range []string{"SALE-G", "SALE-F", "SALE-E", "SALE-D", "SALE-C"} {
-		if rows[index].Code != want || rows[index].SalesQuantity != int64(7-index) {
-			t.Fatalf("sales ranking row %d = %+v, want code=%s quantity=%d", index, rows[index], want, 7-index)
+	for index, want := range []string{"SALE-L", "SALE-K", "SALE-J", "SALE-I", "SALE-H", "SALE-G", "SALE-F", "SALE-E", "SALE-D", "SALE-C"} {
+		if rows[index].Code != want || rows[index].SalesQuantity != int64(12-index) {
+			t.Fatalf("sales ranking row %d = %+v, want code=%s quantity=%d", index, rows[index], want, 12-index)
 		}
 	}
 	card, err := larkQueryCard(
 		larkCommand{Action: larkActionTodaySalesRanking},
 		rows,
 		more,
-		[]string{"img_g", "img_f", "img_e", "img_d", "img_c"},
+		[]string{"img_l", "img_k", "img_j", "img_i", "img_h", "img_g", "img_f", "img_e", "img_d", "img_c"},
 	)
-	if err != nil || !strings.Contains(card, "今日销售排行") || strings.Count(card, "**今日售出**") != 5 ||
-		strings.Count(card, `"img_key":"img_`) != 5 || !strings.Contains(card, "库存数量：16 件") ||
+	if err != nil || !strings.Contains(card, "今日销售排行") || strings.Count(card, "**今日售出**") != 10 ||
+		strings.Count(card, `"img_key":"img_`) != 10 || !strings.Contains(card, "库存数量：21 件") ||
 		strings.Contains(card, "售价") || strings.Contains(card, "fit_horizontal") {
 		t.Fatalf("sales ranking card = %s err=%v", card, err)
 	}

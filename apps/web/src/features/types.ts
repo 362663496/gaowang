@@ -18,7 +18,6 @@ export type Product = {
   Code: string;
   ImagePath: string;
   DefaultPurchaseCents: number;
-  DefaultSaleCents: number;
   LowStockThreshold: number;
   Note: string;
   Enabled: boolean;
@@ -54,9 +53,7 @@ export type StockMovement = {
   Shop: Shop | null;
   QuantityDelta: number;
   PurchaseAmountCents: number;
-  RevenueCents: number;
   CostAmountCents: number;
-  GrossProfitCents: number;
   Reason: string;
   OperatorID: string;
   Operator: User;
@@ -78,9 +75,7 @@ export type MovementRevisionValues = {
   shop_id: string | null;
   note: string;
   purchase_amount_cents: number;
-  revenue_cents: number;
   cost_amount_cents: number;
-  gross_profit_cents: number;
 };
 
 export type MovementImpact = {
@@ -91,9 +86,7 @@ export type MovementImpact = {
   result_inventory_value_cents: number;
   inventory_value_delta_cents: number;
   purchase_amount_delta_cents: number;
-  revenue_delta_cents: number;
   cost_delta_cents: number;
-  gross_profit_delta_cents: number;
 };
 
 export type MovementPreview = {
@@ -104,17 +97,16 @@ export type MovementPreview = {
 };
 
 export type SalesSummary = {
-  revenue_cents: number;
+  quantity_sold: number;
+  movement_count: number;
   cost_cents: number;
-  gross_profit_cents: number;
 };
 
 export type SalesTrendRow = {
   day: string;
-  revenue_cents: number;
-  cost_cents: number;
-  gross_profit_cents: number;
   quantity_sold: number;
+  movement_count: number;
+  cost_cents: number;
 };
 
 export type ProductRankingRow = {
@@ -123,9 +115,7 @@ export type ProductRankingRow = {
   product_code: string;
   product_image_path: string;
   archived: boolean;
-  revenue_cents: number;
   cost_cents: number;
-  gross_profit_cents: number;
   quantity_sold: number;
   movement_count: number;
 };
@@ -133,9 +123,7 @@ export type ProductRankingRow = {
 export type ShopRankingRow = {
   shop_id: string;
   shop_name: string;
-  revenue_cents: number;
   cost_cents: number;
-  gross_profit_cents: number;
   quantity_sold: number;
   movement_count: number;
 };

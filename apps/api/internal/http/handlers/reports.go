@@ -14,23 +14,20 @@ type ReportHandler struct {
 
 const (
 	salesQuantityExpr = "(-stock_movements.quantity_delta)"
-	salesRevenueExpr  = salesQuantityExpr + " * products.default_sale_cents"
 	salesCostExpr     = salesQuantityExpr + " * products.default_purchase_cents"
-	salesGrossExpr    = salesQuantityExpr + " * (products.default_sale_cents - products.default_purchase_cents)"
 )
 
 type salesSummary struct {
-	RevenueCents     int64 `json:"revenue_cents"`
-	CostCents        int64 `json:"cost_cents"`
-	GrossProfitCents int64 `json:"gross_profit_cents"`
+	QuantitySold  int64 `json:"quantity_sold"`
+	MovementCount int64 `json:"movement_count"`
+	CostCents     int64 `json:"cost_cents"`
 }
 
 type salesTrendRow struct {
-	Day              string `json:"day"`
-	RevenueCents     int64  `json:"revenue_cents"`
-	CostCents        int64  `json:"cost_cents"`
-	GrossProfitCents int64  `json:"gross_profit_cents"`
-	QuantitySold     int64  `json:"quantity_sold"`
+	Day           string `json:"day"`
+	QuantitySold  int64  `json:"quantity_sold"`
+	MovementCount int64  `json:"movement_count"`
+	CostCents     int64  `json:"cost_cents"`
 }
 
 type productRankingRow struct {
@@ -39,28 +36,24 @@ type productRankingRow struct {
 	ProductCode      string `json:"product_code"`
 	ProductImagePath string `json:"product_image_path"`
 	Archived         bool   `json:"archived"`
-	RevenueCents     int64  `json:"revenue_cents"`
 	CostCents        int64  `json:"cost_cents"`
-	GrossProfitCents int64  `json:"gross_profit_cents"`
 	QuantitySold     int64  `json:"quantity_sold"`
 	MovementCount    int64  `json:"movement_count"`
 }
 
 type shopRankingRow struct {
-	ShopID           string `json:"shop_id"`
-	ShopName         string `json:"shop_name"`
-	RevenueCents     int64  `json:"revenue_cents"`
-	CostCents        int64  `json:"cost_cents"`
-	GrossProfitCents int64  `json:"gross_profit_cents"`
-	QuantitySold     int64  `json:"quantity_sold"`
-	MovementCount    int64  `json:"movement_count"`
+	ShopID        string `json:"shop_id"`
+	ShopName      string `json:"shop_name"`
+	CostCents     int64  `json:"cost_cents"`
+	QuantitySold  int64  `json:"quantity_sold"`
+	MovementCount int64  `json:"movement_count"`
 }
 
 func (h ReportHandler) SalesSummary(c *gin.Context) {
 	var summary salesSummary
 	err := h.DB.Table("stock_movements").
 		Joins("JOIN products ON products.id = stock_movements.product_id").
-		Select("COALESCE(SUM("+salesRevenueExpr+"),0) AS revenue_cents, COALESCE(SUM("+salesCostExpr+"),0) AS cost_cents, COALESCE(SUM("+salesGrossExpr+"),0) AS gross_profit_cents").
+		Select("COALESCE(SUM("+salesQuantityExpr+"),0) AS quantity_sold, COUNT(*) AS movement_count, COALESCE(SUM("+salesCostExpr+"),0) AS cost_cents").
 		Where("stock_movements.type = ?", "sales_outbound").
 		Scan(&summary).Error
 	if err != nil {
@@ -74,7 +67,7 @@ func (h ReportHandler) SalesTrend(c *gin.Context) {
 	from, to := reportRange(c)
 	items := make([]salesTrendRow, 0)
 	err := salesReportBase(h.DB, from, to).
-		Select(reportDateExpr(h.DB) + " AS day, COALESCE(SUM(" + salesRevenueExpr + "),0) AS revenue_cents, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents, COALESCE(SUM(" + salesGrossExpr + "),0) AS gross_profit_cents, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold").
+		Select(reportDateExpr(h.DB) + " AS day, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold, COUNT(*) AS movement_count, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents").
 		Group("day").
 		Order("day asc").
 		Scan(&items).Error
@@ -89,9 +82,9 @@ func (h ReportHandler) ProductRanking(c *gin.Context) {
 	from, to := reportRange(c)
 	items := make([]productRankingRow, 0)
 	err := salesReportBase(h.DB, from, to).
-		Select("stock_movements.product_id AS product_id, products.name AS product_name, products.code AS product_code, products.image_path AS product_image_path, products.archived_at IS NOT NULL AS archived, COALESCE(SUM(" + salesRevenueExpr + "),0) AS revenue_cents, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents, COALESCE(SUM(" + salesGrossExpr + "),0) AS gross_profit_cents, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold, COUNT(*) AS movement_count").
+		Select("stock_movements.product_id AS product_id, products.name AS product_name, products.code AS product_code, products.image_path AS product_image_path, products.archived_at IS NOT NULL AS archived, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold, COUNT(*) AS movement_count, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents").
 		Group("stock_movements.product_id, products.name, products.code, products.image_path, products.archived_at").
-		Order("revenue_cents desc").
+		Order("quantity_sold desc").Order("movement_count desc").Order("products.name asc").Order("stock_movements.product_id asc").
 		Limit(queryLimit(c, 10, 50)).
 		Scan(&items).Error
 	if err != nil {
@@ -106,9 +99,9 @@ func (h ReportHandler) ShopRanking(c *gin.Context) {
 	items := make([]shopRankingRow, 0)
 	err := salesReportBase(h.DB, from, to).
 		Joins("JOIN shops ON shops.id = stock_movements.shop_id").
-		Select("stock_movements.shop_id AS shop_id, shops.name AS shop_name, COALESCE(SUM(" + salesRevenueExpr + "),0) AS revenue_cents, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents, COALESCE(SUM(" + salesGrossExpr + "),0) AS gross_profit_cents, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold, COUNT(*) AS movement_count").
+		Select("stock_movements.shop_id AS shop_id, shops.name AS shop_name, COALESCE(SUM(" + salesQuantityExpr + "),0) AS quantity_sold, COUNT(*) AS movement_count, COALESCE(SUM(" + salesCostExpr + "),0) AS cost_cents").
 		Group("stock_movements.shop_id, shops.name").
-		Order("revenue_cents desc").
+		Order("quantity_sold desc").Order("movement_count desc").Order("shops.name asc").Order("stock_movements.shop_id asc").
 		Limit(queryLimit(c, 10, 50)).
 		Scan(&items).Error
 	if err != nil {

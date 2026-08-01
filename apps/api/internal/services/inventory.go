@@ -33,6 +33,7 @@ type InboundInput struct {
 	ProductID  uuid.UUID
 	ShopID     *uuid.UUID
 	Quantity   int64
+	Note       string
 	OperatorID uuid.UUID
 }
 
@@ -40,6 +41,7 @@ type OutboundInput struct {
 	ProductID  uuid.UUID
 	ShopID     uuid.UUID
 	Quantity   int64
+	Note       string
 	OperatorID uuid.UUID
 }
 
@@ -79,9 +81,7 @@ type MovementRevisionValues struct {
 	ShopID              *uuid.UUID          `json:"shop_id"`
 	Note                string              `json:"note"`
 	PurchaseAmountCents int64               `json:"purchase_amount_cents"`
-	RevenueCents        int64               `json:"revenue_cents"`
 	CostAmountCents     int64               `json:"cost_amount_cents"`
-	GrossProfitCents    int64               `json:"gross_profit_cents"`
 }
 
 type MovementImpact struct {
@@ -92,9 +92,7 @@ type MovementImpact struct {
 	ResultInventoryValueCents  int64 `json:"result_inventory_value_cents"`
 	InventoryValueDeltaCents   int64 `json:"inventory_value_delta_cents"`
 	PurchaseAmountDeltaCents   int64 `json:"purchase_amount_delta_cents"`
-	RevenueDeltaCents          int64 `json:"revenue_delta_cents"`
 	CostDeltaCents             int64 `json:"cost_delta_cents"`
-	GrossProfitDeltaCents      int64 `json:"gross_profit_delta_cents"`
 }
 
 type MovementEditResult struct {
@@ -114,12 +112,9 @@ func CurrentPriceMovement(movement models.StockMovement) (models.StockMovement, 
 
 func priceMovement(movement models.StockMovement, product models.Product) (models.StockMovement, error) {
 	movement.PurchaseUnitCents = nil
-	movement.SaleUnitCents = nil
 	movement.CostUnitCents = product.DefaultPurchaseCents
 	movement.PurchaseAmountCents = 0
-	movement.RevenueCents = 0
 	movement.CostAmountCents = 0
-	movement.GrossProfitCents = 0
 
 	switch movement.Type {
 	case models.MovementTypeInbound:
@@ -141,23 +136,11 @@ func priceMovement(movement models.StockMovement, product models.Product) (model
 		if err != nil {
 			return models.StockMovement{}, err
 		}
-		revenue, err := checkedMul(quantity, product.DefaultSaleCents)
-		if err != nil {
-			return models.StockMovement{}, err
-		}
 		cost, err := checkedMul(quantity, product.DefaultPurchaseCents)
 		if err != nil {
 			return models.StockMovement{}, err
 		}
-		gross, err := checkedSub(revenue, cost)
-		if err != nil {
-			return models.StockMovement{}, err
-		}
-		sale := product.DefaultSaleCents
-		movement.SaleUnitCents = &sale
-		movement.RevenueCents = revenue
 		movement.CostAmountCents = cost
-		movement.GrossProfitCents = gross
 	case models.MovementTypeAdjustment:
 		if movement.QuantityDelta == 0 {
 			return models.StockMovement{}, ErrMovementState
@@ -209,6 +192,14 @@ func validateAdjustment(delta int64, reason string) error {
 	return nil
 }
 
+func normalizeOptionalNote(note string) (string, error) {
+	note = strings.TrimSpace(note)
+	if utf8.RuneCountInString(note) > 500 {
+		return "", fmt.Errorf("备注不能超过 500 字")
+	}
+	return note, nil
+}
+
 func applyInbound(snapshot *models.InventorySnapshot, quantity int64, purchaseCents int64) (models.StockMovement, error) {
 	if quantity <= 0 {
 		return models.StockMovement{}, fmt.Errorf("quantity must be greater than zero")
@@ -235,7 +226,7 @@ func applyInbound(snapshot *models.InventorySnapshot, quantity int64, purchaseCe
 	}, nil
 }
 
-func applySalesOutbound(snapshot *models.InventorySnapshot, quantity int64, purchaseCents int64, saleCents int64) (models.StockMovement, error) {
+func applySalesOutbound(snapshot *models.InventorySnapshot, quantity int64, purchaseCents int64) (models.StockMovement, error) {
 	if err := validateOutbound(snapshot.Quantity, quantity); err != nil {
 		return models.StockMovement{}, err
 	}
@@ -243,27 +234,15 @@ func applySalesOutbound(snapshot *models.InventorySnapshot, quantity int64, purc
 	if err != nil {
 		return models.StockMovement{}, err
 	}
-	revenue, err := checkedMul(quantity, saleCents)
-	if err != nil {
-		return models.StockMovement{}, err
-	}
-	grossProfit, err := checkedSub(revenue, costAmount)
-	if err != nil {
-		return models.StockMovement{}, err
-	}
 	snapshot.Quantity -= quantity
 	if err := repriceSnapshot(snapshot, purchaseCents); err != nil {
 		return models.StockMovement{}, err
 	}
-	sale := saleCents
 	return models.StockMovement{
-		Type:             models.MovementTypeSalesOutbound,
-		QuantityDelta:    -quantity,
-		SaleUnitCents:    &sale,
-		CostUnitCents:    purchaseCents,
-		RevenueCents:     revenue,
-		CostAmountCents:  costAmount,
-		GrossProfitCents: grossProfit,
+		Type:            models.MovementTypeSalesOutbound,
+		QuantityDelta:   -quantity,
+		CostUnitCents:   purchaseCents,
+		CostAmountCents: costAmount,
 	}, nil
 }
 
@@ -296,8 +275,12 @@ func applyAdjustment(snapshot *models.InventorySnapshot, quantityDelta int64, re
 }
 
 func (s InventoryService) CreateInbound(input InboundInput) (InventoryChange, error) {
+	note, err := normalizeOptionalNote(input.Note)
+	if err != nil {
+		return InventoryChange{}, err
+	}
 	var change InventoryChange
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		product, err := lockActiveProduct(tx, input.ProductID)
 		if err != nil {
 			return err
@@ -316,6 +299,7 @@ func (s InventoryService) CreateInbound(input InboundInput) (InventoryChange, er
 		}
 		movement.ProductID = input.ProductID
 		movement.ShopID = input.ShopID
+		movement.Reason = note
 		movement.OperatorID = input.OperatorID
 		if err := tx.Create(&movement).Error; err != nil {
 			return err
@@ -330,8 +314,12 @@ func (s InventoryService) CreateInbound(input InboundInput) (InventoryChange, er
 }
 
 func (s InventoryService) CreateSalesOutbound(input OutboundInput) (InventoryChange, error) {
+	note, err := normalizeOptionalNote(input.Note)
+	if err != nil {
+		return InventoryChange{}, err
+	}
 	var change InventoryChange
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		product, err := lockActiveProduct(tx, input.ProductID)
 		if err != nil {
 			return err
@@ -341,7 +329,7 @@ func (s InventoryService) CreateSalesOutbound(input OutboundInput) (InventoryCha
 			return err
 		}
 		quantityBefore := snapshot.Quantity
-		movement, err := applySalesOutbound(&snapshot, input.Quantity, product.DefaultPurchaseCents, product.DefaultSaleCents)
+		movement, err := applySalesOutbound(&snapshot, input.Quantity, product.DefaultPurchaseCents)
 		if err != nil {
 			return err
 		}
@@ -350,6 +338,7 @@ func (s InventoryService) CreateSalesOutbound(input OutboundInput) (InventoryCha
 		}
 		movement.ProductID = input.ProductID
 		movement.ShopID = &input.ShopID
+		movement.Reason = note
 		movement.OperatorID = input.OperatorID
 		if err := tx.Create(&movement).Error; err != nil {
 			return err
@@ -477,12 +466,9 @@ func (s InventoryService) UpdateMovement(input MovementUpdateInput) (models.Stoc
 			"shop_id":               next.ShopID,
 			"quantity_delta":        next.QuantityDelta,
 			"purchase_unit_cents":   next.PurchaseUnitCents,
-			"sale_unit_cents":       next.SaleUnitCents,
 			"cost_unit_cents":       next.CostUnitCents,
 			"purchase_amount_cents": next.PurchaseAmountCents,
-			"revenue_cents":         next.RevenueCents,
 			"cost_amount_cents":     next.CostAmountCents,
-			"gross_profit_cents":    next.GrossProfitCents,
 			"reason":                next.Reason,
 			"revision":              nextRevision,
 			"last_edited_by_id":     input.EditorID,
@@ -582,7 +568,7 @@ func calculateMovementUpdate(current models.InventorySnapshot, movement models.S
 			if err != nil {
 				return models.StockMovement{}, MovementEditResult{}, false, err
 			}
-			calculated, err := applySalesOutbound(&before, *input.Quantity, product.DefaultPurchaseCents, product.DefaultSaleCents)
+			calculated, err := applySalesOutbound(&before, *input.Quantity, product.DefaultPurchaseCents)
 			if err != nil {
 				return models.StockMovement{}, MovementEditResult{}, false, movementCalculationError(err)
 			}
@@ -672,15 +658,7 @@ func buildMovementEditResult(current models.InventorySnapshot, result models.Inv
 	if err != nil {
 		return MovementEditResult{}, ErrMovementState
 	}
-	revenueDelta, err := checkedSub(after.RevenueCents, before.RevenueCents)
-	if err != nil {
-		return MovementEditResult{}, ErrMovementState
-	}
 	costDelta, err := checkedSub(after.CostAmountCents, before.CostAmountCents)
-	if err != nil {
-		return MovementEditResult{}, ErrMovementState
-	}
-	grossDelta, err := checkedSub(after.GrossProfitCents, before.GrossProfitCents)
 	if err != nil {
 		return MovementEditResult{}, ErrMovementState
 	}
@@ -691,7 +669,7 @@ func buildMovementEditResult(current models.InventorySnapshot, result models.Inv
 			CurrentQuantity: current.Quantity, ResultQuantity: result.Quantity, QuantityChange: quantityChange,
 			CurrentInventoryValueCents: current.InventoryValueCents, ResultInventoryValueCents: result.InventoryValueCents,
 			InventoryValueDeltaCents: valueDelta, PurchaseAmountDeltaCents: purchaseDelta,
-			RevenueDeltaCents: revenueDelta, CostDeltaCents: costDelta, GrossProfitDeltaCents: grossDelta,
+			CostDeltaCents: costDelta,
 		},
 		ExpectedRevision: before.Revision,
 	}, nil
@@ -703,20 +681,16 @@ func movementRevisionValues(movement models.StockMovement) MovementRevisionValue
 		OperatorID: movement.OperatorID, CreatedAt: movement.CreatedAt,
 		QuantityDelta: movement.QuantityDelta, ShopID: movement.ShopID, Note: movement.Reason,
 		PurchaseAmountCents: movement.PurchaseAmountCents,
-		RevenueCents:        movement.RevenueCents, CostAmountCents: movement.CostAmountCents,
-		GrossProfitCents: movement.GrossProfitCents,
+		CostAmountCents:     movement.CostAmountCents,
 	}
 }
 
 func setMovementNumbers(target *models.StockMovement, source models.StockMovement) {
 	target.QuantityDelta = source.QuantityDelta
 	target.PurchaseUnitCents = source.PurchaseUnitCents
-	target.SaleUnitCents = source.SaleUnitCents
 	target.CostUnitCents = source.CostUnitCents
 	target.PurchaseAmountCents = source.PurchaseAmountCents
-	target.RevenueCents = source.RevenueCents
 	target.CostAmountCents = source.CostAmountCents
-	target.GrossProfitCents = source.GrossProfitCents
 }
 
 func movementAuditMetadata(result MovementEditResult, input MovementUpdateInput, beforeRevision int64, afterRevision int64, editedAt time.Time) (datatypes.JSON, error) {

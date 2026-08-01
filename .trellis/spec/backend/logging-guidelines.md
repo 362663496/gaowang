@@ -31,6 +31,7 @@ User and domain mutations are persisted as `models.AuditLog` through `recordAudi
 - `AUTH_SECRET`, SMTP credentials, or a database URL containing credentials.
 - Full request bodies for authentication, settings, or uploads.
 - Backup attachment contents.
+- DeepSeek API keys/Authorization, raw Feishu user text, or provider response bodies. AI diagnostics log only message ID, failure stage, HTTP status, attempt count, and elapsed milliseconds.
 
 `internal/http/handlers/audit_test.go` explicitly verifies that a failed-login audit record does not contain the submitted password.
 

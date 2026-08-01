@@ -25,12 +25,14 @@ type inboundRequest struct {
 	ProductID string `json:"product_id" binding:"required"`
 	ShopID    string `json:"shop_id"`
 	Quantity  int64  `json:"quantity" binding:"required,gt=0"`
+	Note      string `json:"note"`
 }
 
 type outboundRequest struct {
 	ProductID string `json:"product_id" binding:"required"`
 	ShopID    string `json:"shop_id" binding:"required"`
 	Quantity  int64  `json:"quantity" binding:"required,gt=0"`
+	Note      string `json:"note"`
 }
 
 type adjustmentRequest struct {
@@ -128,12 +130,15 @@ func (h InventoryHandler) CreateInbound(c *gin.Context) {
 		shopID = &parsedShopID
 	}
 	change, err := services.InventoryService{DB: h.DB}.CreateInbound(services.InboundInput{
-		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, OperatorID: currentUserID(c),
+		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, Note: req.Note, OperatorID: currentUserID(c),
 	})
 	if writeStockResult(c, err) {
 		metadata := map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10)}
 		if shopID != nil {
 			metadata["shop_id"] = shopID.String()
+		}
+		if change.Movement.Reason != "" {
+			metadata["note"] = change.Movement.Reason
 		}
 		recordAudit(c, h.DB, "inventory.inbound", "product", productID.String(), metadata)
 		h.Lark.Enqueue(change)
@@ -154,10 +159,14 @@ func (h InventoryHandler) CreateSalesOutbound(c *gin.Context) {
 		return
 	}
 	change, err := services.InventoryService{DB: h.DB}.CreateSalesOutbound(services.OutboundInput{
-		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, OperatorID: currentUserID(c),
+		ProductID: productID, ShopID: shopID, Quantity: req.Quantity, Note: req.Note, OperatorID: currentUserID(c),
 	})
 	if writeStockResult(c, err) {
-		recordAudit(c, h.DB, "inventory.sales_outbound", "product", productID.String(), map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10), "shop_id": shopID.String()})
+		metadata := map[string]string{"quantity": strconv.FormatInt(req.Quantity, 10), "shop_id": shopID.String()}
+		if change.Movement.Reason != "" {
+			metadata["note"] = change.Movement.Reason
+		}
+		recordAudit(c, h.DB, "inventory.sales_outbound", "product", productID.String(), metadata)
 		h.Lark.Enqueue(change)
 	}
 }

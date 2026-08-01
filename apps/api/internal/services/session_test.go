@@ -104,6 +104,23 @@ func Test_SessionService_delete_all_for_user(t *testing.T) {
 	}
 }
 
+func Test_SessionService_rejects_soft_deleted_user(t *testing.T) {
+	db := newServiceTestDB(t, &models.User{}, &models.Session{})
+	user := createTestUser(t, db, models.RoleStaff, true)
+	svc := SessionService{DB: db, Secret: "abcdefghijklmnopqrstuvwxyz123456"}
+	raw, _, err := svc.Create(user.ID)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Model(&models.User{}).Where("id = ?", user.ID).Update("deleted_at", now).Error; err != nil {
+		t.Fatalf("soft delete user: %v", err)
+	}
+	if _, _, err := svc.LookupActiveUser(raw); err == nil {
+		t.Fatal("expected soft-deleted user rejection")
+	}
+}
+
 func createTestUser(t *testing.T, db *gorm.DB, role models.Role, enabled bool) models.User {
 	t.Helper()
 	hash, err := HashPassword("password123")

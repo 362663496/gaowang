@@ -18,8 +18,8 @@ type Props = {
   canAdjust?: boolean;
 };
 
-type InboundValues = { product_id: string; shop_id?: string; quantity: number };
-type OutboundValues = { product_id: string; shop_id: string; quantity: number };
+type InboundValues = { product_id: string; shop_id?: string; quantity: number; note?: string };
+type OutboundValues = { product_id: string; shop_id: string; quantity: number; note?: string };
 type AdjustmentValues = { product_id: string; quantity_delta: number; reason: string };
 
 export function InventoryActions({
@@ -55,6 +55,7 @@ function InboundForm({ products, shops, onDone }: Pick<Props, "products" | "shop
         product_id: values.product_id,
         shop_id: values.shop_id ?? "",
         quantity: values.quantity,
+        note: values.note?.trim() ?? "",
       });
       setOpen(false);
       onDone("入库已记录");
@@ -100,6 +101,9 @@ function InboundForm({ products, shops, onDone }: Pick<Props, "products" | "shop
           <Form.Item label="数量" name="quantity" rules={[{ required: true, message: "请输入数量" }]}>
             <InputNumber min={1} precision={0} style={{ width: "100%" }} />
           </Form.Item>
+          <Form.Item label="备注（可选）" name="note">
+            <Input.TextArea maxLength={500} rows={3} showCount />
+          </Form.Item>
           <FormActions label="保存入库" saving={saving} onCancel={() => setOpen(false)} />
         </Form>
       </Modal>
@@ -126,6 +130,7 @@ function OutboundForm({ products, shops, inventory, onDone }: Props) {
         product_id: values.product_id,
         shop_id: values.shop_id,
         quantity: values.quantity,
+        note: values.note?.trim() ?? "",
       });
       setOpen(false);
       onDone("销售出库已记录");
@@ -169,6 +174,9 @@ function OutboundForm({ products, shops, inventory, onDone }: Props) {
           </Form.Item>
           <Form.Item label={`数量（当前 ${formatQuantity(stock)}）`} name="quantity" rules={[{ required: true, message: "请输入数量" }]}>
             <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item label="备注（可选）" name="note">
+            <Input.TextArea maxLength={500} rows={3} showCount />
           </Form.Item>
           {shortage ? <Alert message="当前库存不足，提交会被服务端拒绝。" showIcon style={{ marginBottom: 16 }} type="warning" /> : null}
           <FormActions label="保存出库" saving={saving} onCancel={() => setOpen(false)} />

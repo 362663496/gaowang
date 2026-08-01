@@ -51,6 +51,7 @@ const auditActions: Record<string, string> = {
   "inventory.adjustment": "库存调整",
   "movement.updated": "修订流水",
   "user.create": "新增用户",
+  "user.delete": "删除用户",
   "backup.run_succeeded": "备份成功",
   "backup.run_failed": "备份失败",
   "settings.update": "设置修改",
