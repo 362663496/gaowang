@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-07-31
+- **Total Sessions**: 8
+- **Last Active**: 2026-08-01
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~241 | Active |
+| `journal-1.md` | ~276 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-08-01 | 飞书机器人查询体验升级 | `fca728d`, `bf9488b`, `faeeaa0` | `master` |
 | 7 | 2026-07-31 | 飞书库存机器人上线验证 | `8639318` | `master` |
 | 6 | 2026-07-30 | 库存卡片与统一商品价格发布 | `ca49234d0514ea99aaf1c4ef466796aeb8b1ff2d` | `master` |
 | 5 | 2026-07-22 | 流水修订与图片优先发布 | `81ed7ae`, `04af479` | `master` |

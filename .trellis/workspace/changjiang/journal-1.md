@@ -239,3 +239,38 @@ Completed database-backed cookie sessions, explicit route permissions, staff per
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 飞书机器人查询体验升级
+
+**Date**: 2026-08-01
+**Task**: 飞书机器人查询体验升级
+**Branch**: `master`
+
+### Summary
+
+完成飞书库存机器人自然语言查询、组合统计、商品图片与卡片体验升级；Go 测试和 go vet 通过，任务已归档。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fca728d` | (see git log) |
+| `bf9488b` | (see git log) |
+| `faeeaa0` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
