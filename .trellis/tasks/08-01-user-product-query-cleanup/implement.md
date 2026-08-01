@@ -39,13 +39,13 @@
 
 - [x] 仅暂存本任务文件，保留无关工作树改动。
 - [x] 运行 `npx gitnexus detect-changes --scope staged --repo gaowang`，确认只影响预期符号和流程。
-- [ ] 审阅 staged diff，提交并推送精确发布提交。
+- [x] 审阅 staged diff，提交并推送精确发布提交。
 
 ## 5. 阿里云发布
 
-- [ ] 按 Aliyun release 规范本地构建 Linux API 和 Web standalone 包并完成本地 smoke。
-- [ ] 切换前创建并校验 PostgreSQL 备份，核对归档校验和及提交元数据。
-- [ ] 原子切换 `/opt/gaowang/current`，依次重启 API/Web。
-- [ ] 验证 API/Nginx 健康、登录、静态资源、上传、`users.deleted_at`、服务重启次数和近期日志。
+- [x] 按 Aliyun release 规范本地构建 Linux API 和 Web standalone 包并完成本地 smoke。
+- [x] 切换前创建并校验 PostgreSQL 备份，核对归档校验和及提交元数据。
+- [x] 原子切换 `/opt/gaowang/current`，依次重启 API/Web。
+- [x] 验证 API/Nginx 健康、登录、静态资源、上传、`users.deleted_at`、服务重启次数和近期日志。
 - [ ] 用目标飞书群执行代表性自然语言查询，确认回复、重试诊断和卡片布局。
-- [ ] 任一生产检查失败则切回上一 symlink 并重启两项服务。
+- [x] 任一生产检查失败则切回上一 symlink 并重启两项服务。
