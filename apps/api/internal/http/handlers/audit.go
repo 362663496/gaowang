@@ -79,6 +79,7 @@ func recordAuditForActor(c *gin.Context, db *gorm.DB, actorID *uuid.UUID, action
 	if db == nil {
 		return
 	}
+	metadata = withAuthMetadata(c, metadata)
 	log := models.AuditLog{
 		ActorID:      actorID,
 		Action:       action,
@@ -90,6 +91,30 @@ func recordAuditForActor(c *gin.Context, db *gorm.DB, actorID *uuid.UUID, action
 	if err := db.Create(&log).Error; err != nil {
 		return
 	}
+}
+
+func withAuthMetadata(c *gin.Context, metadata map[string]string) map[string]string {
+	if c == nil {
+		return metadata
+	}
+	authMethod, _ := c.Get("auth_method")
+	method, _ := authMethod.(string)
+	if method == "" {
+		return metadata
+	}
+	out := make(map[string]string, len(metadata)+2)
+	for key, value := range metadata {
+		out[key] = value
+	}
+	out["auth_method"] = method
+	if method == "api_token" {
+		if prefix, ok := c.Get("token_prefix"); ok {
+			if text, ok := prefix.(string); ok && text != "" {
+				out["token_prefix"] = text
+			}
+		}
+	}
+	return out
 }
 
 func auditMetadata(metadata map[string]string) datatypes.JSON {

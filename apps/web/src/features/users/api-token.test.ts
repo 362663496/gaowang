@@ -1,0 +1,46 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApiToken, getApiToken, mcpConfigJson, mcpEndpoint, revokeApiToken } from "./api-token";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  vi.restoreAllMocks();
+});
+
+describe("api token helpers", () => {
+  it("loads the current token metadata", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ token: { prefix: "gw_abcd", created_at: "2026-09-14T00:00:00Z", last_used_at: null } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(getApiToken()).resolves.toEqual({
+      token: { prefix: "gw_abcd", created_at: "2026-09-14T00:00:00Z", last_used_at: null },
+    });
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/v1/auth/api-token", expect.objectContaining({ method: "GET" }));
+  });
+
+  it("creates a token and builds remote MCP config", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ token: { prefix: "gw_abcd", created_at: "2026-09-14T00:00:00Z", last_used_at: null }, secret: "gw_secret" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const created = await createApiToken();
+    expect(created.secret).toBe("gw_secret");
+    expect(mcpEndpoint("https://stock.example")).toBe("https://stock.example/api/v1/mcp");
+    expect(mcpConfigJson("https://stock.example", created.secret)).toContain("Bearer gw_secret");
+    expect(mcpConfigJson("https://stock.example", created.secret)).toContain("https://stock.example/api/v1/mcp");
+  });
+
+  it("revokes the token with DELETE", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    await revokeApiToken();
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/v1/auth/api-token", expect.objectContaining({ method: "DELETE" }));
+  });
+});

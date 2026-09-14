@@ -24,7 +24,7 @@ func NewRouter(cfg config.Config, database *gorm.DB) *gin.Engine {
 	api.POST("/auth/login", authHandler.Login)
 
 	protected := api.Group("")
-	protected.Use(RequireAuth(database, cfg))
+	protected.Use(RequireAuth(database, cfg), RejectAPITokenUnlessAllowlisted())
 	mountProtected(protected, cfg, database)
 
 	return router
@@ -47,6 +47,9 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 	group.GET("/auth/me", authHandler.Me)
 	group.POST("/auth/logout", authHandler.Logout)
 	group.POST("/auth/password", authHandler.ChangePassword)
+	group.GET("/auth/api-token", authHandler.GetAPIToken)
+	group.PUT("/auth/api-token", authHandler.PutAPIToken)
+	group.DELETE("/auth/api-token", authHandler.DeleteAPIToken)
 
 	group.GET("/products", RequirePermission(services.PermProductRead), productHandler.List)
 	group.POST("/products", RequirePermission(services.PermProductCreate), productHandler.Create)
@@ -84,4 +87,7 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 
 	group.GET("/permissions", RequirePermission(services.PermPermissionRead), permissionHandler.Get)
 	group.PUT("/permissions", RequirePermission(services.PermPermissionUpdate), permissionHandler.Update)
+
+	mcpHandler := handlers.MCPHandler{DB: database, Lark: inventoryHandler.Lark}
+	group.Any("/mcp", mcpHandler.Serve)
 }

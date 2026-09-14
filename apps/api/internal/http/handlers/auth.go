@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"gaowang/apps/api/internal/config"
 	"gaowang/apps/api/internal/models"
@@ -101,6 +103,70 @@ func (h AuthHandler) Logout(c *gin.Context) {
 	_ = sessions.DeleteByToken(token)
 	clearAuthCookie(c, h.Cfg)
 	c.Status(http.StatusNoContent)
+}
+
+type apiTokenResponse struct {
+	Prefix     string     `json:"prefix"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+}
+
+func (h AuthHandler) GetAPIToken(c *gin.Context) {
+	user, ok := currentUser(c)
+	if !ok {
+		writeError(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+		return
+	}
+	token, err := (services.APITokenService{DB: h.DB, Secret: h.Cfg.AuthSecret}).GetForUser(user.ID)
+	if errors.Is(err, services.ErrAPITokenNotFound) {
+		c.JSON(http.StatusOK, gin.H{"token": nil})
+		return
+	}
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to load api token")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": apiTokenView(token)})
+}
+
+func (h AuthHandler) PutAPIToken(c *gin.Context) {
+	user, ok := currentUser(c)
+	if !ok {
+		writeError(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+		return
+	}
+	raw, token, replaced, err := (services.APITokenService{DB: h.DB, Secret: h.Cfg.AuthSecret}).ReplaceForUser(user.ID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to save api token")
+		return
+	}
+	action := "api_token.created"
+	if replaced {
+		action = "api_token.regenerated"
+	}
+	recordAudit(c, h.DB, action, "api_token", user.ID.String(), map[string]string{"prefix": token.TokenPrefix})
+	c.JSON(http.StatusOK, gin.H{"token": apiTokenView(token), "secret": raw})
+}
+
+func (h AuthHandler) DeleteAPIToken(c *gin.Context) {
+	user, ok := currentUser(c)
+	if !ok {
+		writeError(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+		return
+	}
+	deleted, err := (services.APITokenService{DB: h.DB, Secret: h.Cfg.AuthSecret}).DeleteForUser(user.ID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to revoke api token")
+		return
+	}
+	if deleted {
+		recordAudit(c, h.DB, "api_token.revoked", "api_token", user.ID.String(), nil)
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func apiTokenView(token models.APIToken) apiTokenResponse {
+	return apiTokenResponse{Prefix: token.TokenPrefix, CreatedAt: token.CreatedAt, LastUsedAt: token.LastUsedAt}
 }
 
 func (h AuthHandler) ChangePassword(c *gin.Context) {

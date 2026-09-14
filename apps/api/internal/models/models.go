@@ -57,6 +57,16 @@ type Session struct {
 	CreatedAt time.Time
 }
 
+// APIToken stores only the HMAC hash of a personal API token. One row per user.
+type APIToken struct {
+	TokenHash   string    `gorm:"primaryKey;size:64"`
+	UserID      uuid.UUID `gorm:"type:uuid;not null;uniqueIndex"`
+	User        User      `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	TokenPrefix string    `gorm:"size:12;not null"`
+	CreatedAt   time.Time
+	LastUsedAt  *time.Time
+}
+
 // LegacyStaffPermission keeps the retired shared-grant table readable during migration.
 type LegacyStaffPermission struct {
 	Permission string `gorm:"primaryKey;size:64"`

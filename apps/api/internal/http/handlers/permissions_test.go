@@ -171,7 +171,7 @@ func Test_ZeroPermissionStaff_denied_on_business_routes(t *testing.T) {
 			continue
 		}
 		path := route.Path
-		if path == "/api/v1/health" || path == "/api/v1/auth/login" || path == "/api/v1/auth/me" || path == "/api/v1/auth/logout" || path == "/api/v1/auth/password" {
+		if path == "/api/v1/health" || path == "/api/v1/auth/login" || path == "/api/v1/auth/me" || path == "/api/v1/auth/logout" || path == "/api/v1/auth/password" || path == "/api/v1/auth/api-token" || path == "/api/v1/mcp" {
 			continue
 		}
 		if strings.Contains(path, ":") {

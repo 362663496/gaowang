@@ -82,6 +82,9 @@ func (h UserHandler) Delete(c *gin.Context) {
 		if err := (services.SessionService{}).DeleteAllForUserTx(tx, target.ID); err != nil {
 			return err
 		}
+		if err := (services.APITokenService{}).DeleteForUserTx(tx, target.ID); err != nil {
+			return err
+		}
 		if err := tx.Where("user_id = ?", target.ID).Delete(&models.UserPermission{}).Error; err != nil {
 			return err
 		}

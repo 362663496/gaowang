@@ -19,6 +19,24 @@ Self-hosted lightweight inventory admin system.
 - Staff start with zero business permissions after upgrade or first deploy. An admin must open **权限管理** and grant access.
 - Product delete is an independent permission from create/edit/toggle.
 - API and Web must be deployed together; old development `X-Dev-*` headers are ignored.
+- Each user may create one personal API token in **设置**. The raw value is shown once; the database stores only its HMAC hash. Send it as `Authorization: Bearer gw_...`. Token requests skip browser Origin checks. Cookie sessions still require same-origin for mutations.
+- A token may call only: `GET /products`, `GET /shops`, `GET /inventory`, `GET /stock-movements`, `POST /inventory/inbound`, `POST /inventory/sales-outbound`, `POST /inventory/adjustments`, and the remote MCP endpoint. It still needs the user's business permissions. User, permission, backup, settings, product writes, movement edits, and inventory export stay blocked.
+- Remote MCP is `https://<host>/api/v1/mcp` (Streamable HTTP). Example Cursor / Claude MCP config after creating a token:
+
+```json
+{
+  "mcpServers": {
+    "gaowang": {
+      "url": "https://<host>/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer gw_..."
+      }
+    }
+  }
+}
+```
+
+Ask the connected AI in Chinese, for example `绿茶还有多少` or `给总店出库 2 件绿茶`. Tools resolve products and shops by code or name; ambiguous names are rejected instead of guessed. Changing a password does not revoke the API token; disabling, deleting, regenerating, or revoking does.
 
 ## Core Commands
 
