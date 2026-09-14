@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import type { AppSettings } from "@/features/types";
 import { useSession } from "@/components/layout/session-context";
-import { createApiToken, getApiToken, mcpConfigJson, revokeApiToken, type ApiTokenInfo } from "@/features/users/api-token";
+import { copyText, createApiToken, getApiToken, mcpConfigJson, revokeApiToken, type ApiTokenInfo } from "@/features/users/api-token";
 import { changePassword, type ChangePasswordInput } from "@/features/users/password";
 import { formatDateTime } from "@/lib/format";
 import { apiGet, apiPost } from "@/lib/api";
@@ -130,10 +130,10 @@ export default function SettingsPage() {
               token={token}
               onCopy={async (text, okMessage) => {
                 try {
-                  await navigator.clipboard.writeText(text);
+                  await copyText(text);
                   message.success(okMessage);
-                } catch {
-                  setError("复制失败，请手动选择文本");
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "复制失败，请手动选择文本");
                 }
               }}
               onCreate={async () => {
@@ -278,7 +278,7 @@ function ApiTokenPanel(props: {
           message="请立即复制完整 Token。刷新页面后将无法再看到。"
           description={
             <Flex gap={8} vertical>
-              <Typography.Paragraph copyable={{ text: props.secret }} style={{ marginBottom: 0 }}>
+              <Typography.Paragraph style={{ marginBottom: 0 }}>
                 <Typography.Text code>{props.secret}</Typography.Text>
               </Typography.Paragraph>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>

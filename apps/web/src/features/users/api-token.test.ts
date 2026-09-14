@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApiToken, getApiToken, mcpConfigJson, mcpEndpoint, revokeApiToken } from "./api-token";
+import { copyText, createApiToken, getApiToken, mcpConfigJson, mcpEndpoint, revokeApiToken } from "./api-token";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -42,5 +43,32 @@ describe("api token helpers", () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     await revokeApiToken();
     expect(globalThis.fetch).toHaveBeenCalledWith("/api/v1/auth/api-token", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("copies via execCommand when the page is not a secure context", async () => {
+    const textarea = {
+      value: "",
+      style: {} as CSSStyleDeclaration,
+      setAttribute: vi.fn(),
+      focus: vi.fn(),
+      select: vi.fn(),
+      setSelectionRange: vi.fn(),
+      remove: vi.fn(),
+    };
+    const execCommand = vi.fn().mockReturnValue(true);
+    const appendChild = vi.fn();
+    vi.stubGlobal("window", { isSecureContext: false });
+    vi.stubGlobal("navigator", {});
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => textarea),
+      execCommand,
+      body: { appendChild },
+    });
+
+    await copyText("gw_secret");
+
+    expect(textarea.value).toBe("gw_secret");
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(textarea.remove).toHaveBeenCalled();
   });
 });

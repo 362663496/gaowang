@@ -45,3 +45,35 @@ export function mcpConfigJson(origin: string, secret: string): string {
     2,
   )}\n`;
 }
+
+export async function copyText(text: string): Promise<void> {
+  if (typeof window !== "undefined" && window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // HTTP sites and some permission prompts fall through to the legacy path.
+    }
+  }
+  copyTextLegacy(text);
+}
+
+function copyTextLegacy(text: string): void {
+  if (typeof document === "undefined") {
+    throw new Error("复制失败，请手动选择文本");
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) {
+    throw new Error("复制失败，请手动选择文本");
+  }
+}
