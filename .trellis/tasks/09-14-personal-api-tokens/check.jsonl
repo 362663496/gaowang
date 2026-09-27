@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go format, test, and vet gate"}
+{"file": ".trellis/spec/backend/http-contracts.md", "reason": "Cookie CSRF must remain; Bearer is the new exception"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "401 vs 403 and middleware error envelope"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Audit must not persist raw tokens"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Web lint, tsc, test, and build gate"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Settings page must type the token API envelopes"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Empty/error/confirm states on the token card"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Allowlist, permissions, and UI must not drift"}

@@ -10,7 +10,7 @@ apps/api/
 ├── internal/models/                # persisted models and domain enums
 ├── internal/http/router.go         # route groups and dependency wiring
 ├── internal/http/middleware.go     # authentication and role gates
-├── internal/http/handlers/         # HTTP parsing, responses, and audit calls
+├── internal/http/handlers/         # HTTP parsing, responses, audit, and remote MCP tools
 └── internal/services/              # reusable business and side-effect logic
 ```
 

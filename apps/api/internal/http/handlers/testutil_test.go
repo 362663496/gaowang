@@ -38,7 +38,7 @@ func openHandlerTestDB(t *testing.T, modelsToMigrate ...any) *gorm.DB {
 }
 
 func authModels() []any {
-	return []any{&models.User{}, &models.Session{}, &models.UserPermission{}, &models.AuditLog{}}
+	return []any{&models.User{}, &models.Session{}, &models.APIToken{}, &models.UserPermission{}, &models.AuditLog{}}
 }
 
 func createTestUser(t *testing.T, db *gorm.DB, name string, email string, password string, role models.Role) models.User {
@@ -73,6 +73,40 @@ func withAuth(request *http.Request, rawToken string) *http.Request {
 		request.AddCookie(&http.Cookie{Name: services.SessionCookieName, Value: rawToken})
 	}
 	return request
+}
+
+func createAPIToken(t *testing.T, db *gorm.DB, userID uuid.UUID) string {
+	t.Helper()
+	svc := services.APITokenService{DB: db, Secret: testAuthSecret}
+	raw, _, _, err := svc.ReplaceForUser(userID)
+	if err != nil {
+		t.Fatalf("create api token: %v", err)
+	}
+	return raw
+}
+
+func doBearerJSON(t *testing.T, router http.Handler, method string, path string, apiToken string, payload any) *httptest.ResponseRecorder {
+	t.Helper()
+	var body *bytes.Reader
+	if payload == nil {
+		body = bytes.NewReader(nil)
+	} else {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		body = bytes.NewReader(data)
+	}
+	request := httptest.NewRequest(method, path, body)
+	request.Host = testRequestHost
+	if payload != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	request.Header.Set("Authorization", "Bearer "+apiToken)
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
 }
 
 func doJSON(t *testing.T, router http.Handler, method string, path string, rawToken string, payload any) *httptest.ResponseRecorder {

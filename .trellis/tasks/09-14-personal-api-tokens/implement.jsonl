@@ -1,0 +1,13 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend pre-development checklist and layer index"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where models, middleware, handlers, cmd/mcp belong"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "AutoMigrate list, UUID, no extra repository layer"}
+{"file": ".trellis/spec/backend/http-contracts.md", "reason": "Current cookie-only auth contract that this task extends"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "401/403 envelopes and middleware abort rules"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Audit actions must not log secrets or token hashes"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go test and vet expectations"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend pre-development checklist"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Settings page vs features/users vs lib/api ownership"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Settings card, modal.confirm, Alert for one-time secret"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "API envelope types for the singleton token resource"}
+{"file": ".trellis/spec/frontend/antd-platform.md", "reason": "Ant Design 6 cards, buttons, and feedback"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Token metadata must stay aligned across DB, middleware, audit, and settings UI"}

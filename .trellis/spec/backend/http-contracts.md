@@ -4,15 +4,15 @@
 
 ### 1. Scope / Trigger
 
-Use this contract for authentication, permission changes, or any new protected route under `/api/v1`. The repository web app is the only authenticated client; scripts and third-party clients do not receive a separate token protocol.
+Use this contract for authentication, permission changes, or any new protected route under `/api/v1`. The web app uses Cookie sessions. Personal API tokens and the remote MCP endpoint are the non-browser clients.
 
 ### 2. Signatures
 
-- Session APIs: `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`, `POST /auth/password`.
+- Session APIs: `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`, `POST /auth/password`, plus Cookie-only `GET/PUT/DELETE /auth/api-token`.
 - Permission APIs: `GET /permissions`, `PUT /permissions` with `{"user_id":"UUID","permissions":["product.read"]}`.
-- Middleware: `RequireSameOrigin()`, `RequireAuth(db, cfg)`, `RequirePermission(permission)`.
-- Database: `sessions(token_hash, user_id, expires_at, created_at)` and `user_permissions(user_id, permission, created_at)` with composite primary key `(user_id, permission)`.
-- Read-only exports reuse their domain read permission; for example, `GET /inventory/export` requires `inventory.read`.
+- Middleware: `RequireSameOrigin()`, `RequireAuth(db, cfg)`, `RejectAPITokenUnlessAllowlisted()`, `RequirePermission(permission)`.
+- Database: `sessions(token_hash, user_id, expires_at, created_at)`, `api_tokens(token_hash, user_id unique, token_prefix, created_at, last_used_at)`, and `user_permissions(user_id, permission, created_at)` with composite primary key `(user_id, permission)`.
+- Read-only exports reuse their domain read permission; for example, `GET /inventory/export` requires `inventory.read`. Token clients cannot call export or other non-allowlisted routes.
 
 ### 3. Contracts
 
@@ -23,8 +23,11 @@ Use this contract for authentication, permission changes, or any new protected r
 - `GET /permissions` returns `{"catalog":[],"users":[{"id","name","email","permissions":[]}]}` for all staff, ordered by name, email, then ID; administrators are omitted. `PUT /permissions` validates the target employee, expands dependencies, and replaces only that user's rows.
 - Permission writes record `permission.updated` in the same transaction with the target user ID as `resource_id` and metadata fields `user_id`, `before`, and `after`.
 - On first upgrade, `db.Migrate` copies the retained legacy `staff_permissions` grants to every existing employee and records a `settings` migration marker in one transaction. The legacy table remains for application rollback; the marker prevents restarts from overwriting later user-specific changes.
-- Account routes require only a valid session. Every business route declares one `RequirePermission(...)` at registration; handlers do not branch on roles.
-- `POST`, `PUT`, `PATCH`, and `DELETE` require an `Origin` matching the direct or forwarded scheme and host.
+- Account routes require only a valid Cookie session. Every business route declares one `RequirePermission(...)` at registration; handlers do not branch on roles. `/mcp` is the exception: it authenticates as an API token and checks permissions per tool.
+- Each user has at most one API token. `PUT /auth/api-token` creates or replaces it and returns `secret` once; `GET` returns metadata only; `DELETE` revokes. Raw tokens are `gw_` plus 32 random bytes; only `HMAC-SHA256(AUTH_SECRET, token)` is stored.
+- `Authorization: Bearer` authenticates as that user and skips Origin checks. Cookie mutation requests still require an `Origin` matching the direct or forwarded scheme and host. Invalid Bearer is `401` even if a Cookie is present.
+- API tokens may call only `GET /products|shops|inventory|stock-movements`, `POST /inventory/inbound|sales-outbound|adjustments`, and `GET/POST/DELETE /mcp`. They still need `EffectivePermissions`. Cookie sessions cannot call `/mcp`.
+- Audit metadata for authenticated mutations includes `auth_method` (`session` or `api_token`) and `token_prefix` for token calls. Never persist the raw token or hash.
 - The web client treats `401` as session expiry and redirects to `/login`; `403` emits `gaowang:permissions-refresh`, preserves the session, and surfaces the original error.
 
 ### 4. Validation & Error Matrix
@@ -32,10 +35,12 @@ Use this contract for authentication, permission changes, or any new protected r
 | Condition | Result |
 | --- | --- |
 | Missing, unknown, expired session or disabled user | `401 UNAUTHORIZED`, clear the Cookie |
+| Missing, unknown, or revoked API token, or Bearer used after the user is disabled/deleted | `401 UNAUTHORIZED` without clearing a valid Cookie |
 | Invalid login credentials | `401 INVALID_CREDENTIALS` |
 | Wrong current password on a valid session | `400 INVALID_CREDENTIALS`, keep the session |
-| Missing business permission | `403 FORBIDDEN`, keep the session |
-| Missing, malformed, or cross-origin mutation `Origin` | `403 FORBIDDEN` before the handler |
+| Missing business permission, or API token used on a non-allowlisted route | `403 FORBIDDEN`, keep the session |
+| Cookie session calling `/mcp` | `401 UNAUTHORIZED` `api token required` |
+| Missing, malformed, or cross-origin mutation `Origin` on a Cookie request | `403 FORBIDDEN` before the handler |
 | Unknown or admin-only key in a staff permission update | `400 VALIDATION` |
 | Invalid/missing target user ID or target is an admin | `400 VALIDATION` |
 | Target user does not exist | `404 USER_NOT_FOUND` |
@@ -44,7 +49,8 @@ Use this contract for authentication, permission changes, or any new protected r
 ### 5. Good / Base / Bad Cases
 
 - Good: employee A with `inventory.read` can list and export inventory while employee B without it gets `403`; changing A never changes B.
-- Base: a new zero-permission employee can still call `/auth/me`, change a password, and log out; administrators remain full-access and absent from the editable list.
+- Good: a personal API token lists products without an Origin header, is rejected on `/users`, and cannot rotate itself via `/auth/api-token`.
+- Base: a new zero-permission employee can still call `/auth/me`, change a password, manage their API token, and log out; administrators remain full-access and absent from the editable list.
 - Bad: reading every grant without `WHERE user_id = ?`, clearing all rows during one employee update, or rerunning legacy copy after the migration marker would collapse authorization back into shared state.
 
 ### 6. Tests Required
@@ -52,7 +58,9 @@ Use this contract for authentication, permission changes, or any new protected r
 - Assert login sets an `HttpOnly` Cookie and the database contains only its HMAC hash.
 - Assert forged development headers, expired/deleted sessions, and disabled users do not authenticate.
 - Assert same-origin mutation handling, current-session logout, and all-session password revocation.
-- Enumerate registered routes with a valid zero-permission staff session; every non-public, non-account business route must return `403`.
+- Assert Bearer inventory calls without Origin succeed when permitted, and that Cookie CSRF still rejects cross-origin mutations.
+- Assert one token per user, secret shown once, regenerate/revoke, and that tokens cannot call `/users` or `/auth/api-token`.
+- Enumerate registered routes with a valid zero-permission staff session; every non-public, non-account business route must return `403`. `/auth/api-token` is an account route; `/mcp` is token-only.
 - Assert per-user isolation through `/auth/me` and a business route, dependency closure, unknown/admin-only rejection, invalid target handling, atomic target/before/after audit metadata, and independent destructive permissions.
 - Assert legacy grants copy to existing employees once, exclude administrators, survive retry, do not overwrite later adjustments, and do not apply to employees created after migration.
 - Assert the web API client sends Cookie credentials, redirects only on `401`, refreshes permissions on `403`, and applies the same behavior to downloads.

@@ -19,12 +19,35 @@ const (
 	userKey         = "current_user"
 	permissionsKey  = "current_permissions"
 	sessionTokenKey = "session_raw_token"
+	authMethodKey   = "auth_method"
+	tokenPrefixKey  = "token_prefix"
+
+	authMethodSession  = "session"
+	authMethodAPIToken = "api_token"
+	mcpPath            = "/api/v1/mcp"
 )
+
+var apiTokenAllowlist = map[string]struct{}{
+	http.MethodGet + " /api/v1/products":                  {},
+	http.MethodGet + " /api/v1/shops":                     {},
+	http.MethodGet + " /api/v1/inventory":                 {},
+	http.MethodGet + " /api/v1/stock-movements":           {},
+	http.MethodPost + " /api/v1/inventory/inbound":        {},
+	http.MethodPost + " /api/v1/inventory/sales-outbound": {},
+	http.MethodPost + " /api/v1/inventory/adjustments":    {},
+	http.MethodGet + " /api/v1/mcp":                       {},
+	http.MethodPost + " /api/v1/mcp":                      {},
+	http.MethodDelete + " /api/v1/mcp":                    {},
+}
 
 func RequireSameOrigin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		method := c.Request.Method
 		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+			c.Next()
+			return
+		}
+		if bearerToken(c) != "" {
 			c.Next()
 			return
 		}
@@ -60,7 +83,23 @@ func RequireSameOrigin() gin.HandlerFunc {
 
 func RequireAuth(db *gorm.DB, cfg config.Config) gin.HandlerFunc {
 	sessions := services.SessionService{DB: db, Secret: cfg.AuthSecret}
+	apiTokens := services.APITokenService{DB: db, Secret: cfg.AuthSecret}
 	return func(c *gin.Context) {
+		if raw := bearerToken(c); raw != "" {
+			user, token, lookupErr := apiTokens.LookupActiveUser(raw)
+			if lookupErr != nil {
+				writeMiddlewareError(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+				return
+			}
+			if !setAuthContext(c, db, user) {
+				return
+			}
+			c.Set(authMethodKey, authMethodAPIToken)
+			c.Set(tokenPrefixKey, token.TokenPrefix)
+			c.Next()
+			return
+		}
+
 		rawToken, err := c.Cookie(services.SessionCookieName)
 		if err != nil || rawToken == "" {
 			// Intentionally ignore legacy X-Dev-* headers.
@@ -74,16 +113,36 @@ func RequireAuth(db *gorm.DB, cfg config.Config) gin.HandlerFunc {
 			writeMiddlewareError(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
 			return
 		}
-		permissions, permErr := services.EffectivePermissions(db, user)
-		if permErr != nil {
-			writeMiddlewareError(c, http.StatusInternalServerError, "INTERNAL", "failed to load permissions")
+		if !setAuthContext(c, db, user) {
 			return
 		}
-		c.Set(userIDKey, user.ID)
-		c.Set(roleKey, user.Role)
-		c.Set(userKey, user)
-		c.Set(permissionsKey, services.PermissionSet(permissions))
+		c.Set(authMethodKey, authMethodSession)
 		c.Set(sessionTokenKey, rawToken)
+		c.Next()
+	}
+}
+
+func RejectAPITokenUnlessAllowlisted() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		method := c.Request.Method
+		path := c.FullPath()
+		authMethod, _ := c.Get(authMethodKey)
+		if path == mcpPath {
+			if authMethod != authMethodAPIToken {
+				writeMiddlewareError(c, http.StatusUnauthorized, "UNAUTHORIZED", "api token required")
+				return
+			}
+			c.Next()
+			return
+		}
+		if authMethod != authMethodAPIToken {
+			c.Next()
+			return
+		}
+		if _, ok := apiTokenAllowlist[method+" "+path]; !ok {
+			writeMiddlewareError(c, http.StatusForbidden, "FORBIDDEN", "permission denied")
+			return
+		}
 		c.Next()
 	}
 }
@@ -107,6 +166,27 @@ func RequirePermission(permission string) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func setAuthContext(c *gin.Context, db *gorm.DB, user models.User) bool {
+	permissions, permErr := services.EffectivePermissions(db, user)
+	if permErr != nil {
+		writeMiddlewareError(c, http.StatusInternalServerError, "INTERNAL", "failed to load permissions")
+		return false
+	}
+	c.Set(userIDKey, user.ID)
+	c.Set(roleKey, user.Role)
+	c.Set(userKey, user)
+	c.Set(permissionsKey, services.PermissionSet(permissions))
+	return true
+}
+
+func bearerToken(c *gin.Context) string {
+	header := strings.TrimSpace(c.GetHeader("Authorization"))
+	if !strings.HasPrefix(header, "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
 }
 
 func writeMiddlewareError(c *gin.Context, status int, code string, message string) {
