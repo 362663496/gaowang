@@ -199,6 +199,23 @@ type Setting struct {
 	UpdatedAt time.Time
 }
 
+// MCPIdempotencyKey stores a successful MCP write so the same caller request_id
+// is not applied twice. Rows older than the service retention window may be deleted.
+type MCPIdempotencyKey struct {
+	ID          uuid.UUID      `gorm:"type:uuid;primaryKey"`
+	ActorID     uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_mcp_request,priority:1"`
+	RequestID   string         `gorm:"size:128;not null;uniqueIndex:idx_mcp_request,priority:2"`
+	Tool        string         `gorm:"size:64;not null"`
+	Fingerprint string         `gorm:"size:64;not null"`
+	Response    datatypes.JSON `gorm:"type:jsonb;not null"`
+	CreatedAt   time.Time      `gorm:"index"`
+}
+
+func (k *MCPIdempotencyKey) BeforeCreate(_ *gorm.DB) error {
+	assignUUID(&k.ID)
+	return nil
+}
+
 func assignUUID(id *uuid.UUID) {
 	if *id == uuid.Nil {
 		*id = uuid.New()

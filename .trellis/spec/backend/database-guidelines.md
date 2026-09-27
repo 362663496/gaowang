@@ -46,6 +46,8 @@ References: `internal/services/inventory.go` and `internal/services/inventory_te
 
 Runtime settings use the `settings` key/value table. Database values override environment fallbacks, as shown by `BackupRecipient`. Keep a key constant next to its only handler. A key read by both a handler and a process scheduler lives with that service, as `backup.schedule_enabled` and `backup.schedule_time` do. Test both stored and fallback behavior.
 
+Successful MCP writes can store `mcp_idempotency_keys(actor_id, request_id, tool, fingerprint, response, created_at)`. The pair `(actor_id, request_id)` is unique. The service deletes rows older than 7 days; do not infer retention from the table being non-empty.
+
 ## Avoid
 
 - Stock updates outside `InventoryService` or outside an explicit transaction.

@@ -34,6 +34,7 @@ func Migrate(database *gorm.DB) error {
 		&models.AuditLog{},
 		&models.BackupJob{},
 		&models.Setting{},
+		&models.MCPIdempotencyKey{},
 	); err != nil {
 		return fmt.Errorf("migrate database schema: %w", err)
 	}

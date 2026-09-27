@@ -330,3 +330,52 @@ db.Model(&models.InventorySnapshot{}).Where("product_id = ?", productID).Update(
 // Correct: the service owns latest/version checks, shared accounting, and the transaction.
 movement, impact, err := (services.InventoryService{DB: db}).UpdateMovement(input)
 ```
+
+## Scenario: Remote MCP Inventory Tools
+
+### 1. Scope / Trigger
+
+Use this contract when changing `/api/v1/mcp` tools used by an assistant to query stock, page movements, summarize history, or post inventory. New arguments are optional. Omitting them keeps the previous query and write behavior, except the default tool payload is now the slim shape below.
+
+### 2. Signatures
+
+- `list_stock_movements`: optional `limit` (default 50, values above 1000 are clamped), `cursor`, `order` (`asc` or `desc`, default `desc` by `created_at` then `id`).
+- `summarize_movements`: optional `type`, `from`, `to`, `shop_query`, `product_query`, and `group_by` (`shop`, `product`, `date`).
+- `get_inventory`: optional `codes` (exact product codes, at most 1000) and `verbose`.
+- `create_inbound`, `create_sales_outbound`, `create_adjustment`, and `create_sales_outbound_batch`: optional `request_id` and `verbose`. Batch also accepts `dry_run` and at most 200 `items`.
+- Persistence: `mcp_idempotency_keys`, unique on `(actor_id, request_id)`.
+
+### 3. Contracts
+
+- Dates are Shanghai `YYYY-MM-DD` and include both endpoints. Money fields are integer cents. Movement cost uses the current product purchase price, matching `CurrentPriceMovement`.
+- `list_stock_movements` returns `items`, `next_cursor` (`null` when the page is complete), and `total_count` for the filter, independent of `cursor`.
+- `summarize_movements` aggregates in the database and returns every group plus `totals`. `quantity` is the sum of absolute deltas. Outbound cost is quantity times the current purchase price; inbound cost is 0.
+- `create_sales_outbound_batch` resolves every item before writing. Any invalid item or insufficient stock rolls back the whole batch and returns `ok: false` with each failure. Success writes every movement in one transaction. `dry_run: true` returns the projected result and writes nothing.
+- `codes` returns every requested code. A missing or archived code is `{product_code, not_found: true}` and is not dropped. Combined with `q`, the result is the union. `low_stock` filters only the keyword list.
+- A successful write with `request_id` is stored for the authenticated user for 7 days. The same user, tool, and arguments return the first payload with `duplicate: true` and do not write again. Different arguments return `IDEMPOTENCY_CONFLICT` and do not write. Failed validation does not consume the key. `dry_run` does not store a key.
+- Default movement items are `{id, type, created_at, product_code, product_name, shop_name, quantity_delta, cost_amount_cents, note}`. Default inventory items are `{product_code, product_name, quantity, low_stock_threshold}`. `verbose: true` returns the previous full `product` and `shop` objects.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| `order` is not `asc` or `desc`, or `cursor` cannot be decoded | tool error `VALIDATION` |
+| `summarize_movements` date or `group_by` is invalid | tool error `VALIDATION` |
+| Batch item is missing, ambiguous, duplicated, non-positive, or short of stock | `ok: false`, no movements; stock errors include `available` and `requested` |
+| Same `request_id` with different arguments | tool error `IDEMPOTENCY_CONFLICT`, no write |
+| Same successful `request_id` within 7 days | first payload plus `duplicate: true` |
+
+### 5. Tests Required
+
+Route tests must show cursor paging equals `total_count` with no duplicate or missing IDs, summary totals equal the repriced movement rows, a short batch item leaves every snapshot unchanged, and a repeated `request_id` deducts stock once.
+
+### 6. Wrong vs Correct
+
+```go
+// Wrong: page with a fixed 50-row cap, or write batch items in separate transactions.
+query.Limit(50).Find(&movements)
+for _, item := range items { service.CreateSalesOutbound(item) }
+
+// Correct: return a stable cursor and commit every accepted batch line in one transaction.
+service.CreateSalesOutboundBatch(input, false)
+```
