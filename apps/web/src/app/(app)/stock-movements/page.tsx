@@ -102,7 +102,7 @@ export default function StockMovementsPage() {
 
   const columns: TableProps<StockMovement>["columns"] = [
     { title: "类型", dataIndex: "Type", width: 110, render: (value: MovementType) => <MovementBadge type={value} /> },
-    { title: "商品", dataIndex: "Product", width: 280, render: (product: Product) => <ProductIdentity product={product} /> },
+    { title: "商品", dataIndex: "Product", width: 280, render: (product: Product) => <ProductIdentity preview product={product} /> },
     { title: "店铺", dataIndex: ["Shop", "Name"], width: 130, render: (value?: string) => value ?? "-" },
     { title: "数量", dataIndex: "QuantityDelta", width: 100, render: formatQuantity },
     {

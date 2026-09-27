@@ -1,18 +1,28 @@
 "use client";
 
-import { DownloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Col, Flex, Input, Pagination, Row, Statistic } from "antd";
+import { DownloadOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Card, Col, Flex, Form, Input, InputNumber, Pagination, Row, Select, Statistic } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { PageEmpty, PageLoading } from "@/components/layout/page-feedback";
 import { useSession } from "@/components/layout/session-context";
 import { InventoryActions } from "@/features/inventory/action-forms";
+import { inventoryListQuery, inventoryQuantityRangeError, type InventoryOrder, type InventorySort } from "@/features/inventory/list-query";
 import { StockBadge, stockStatus } from "@/features/labels";
 import { initialPagination, tablePagination } from "@/features/pagination";
 import { ProductIdentity } from "@/features/product-identity";
 import type { InventorySnapshot, Paginated, Product, Shop } from "@/features/types";
 import { apiDownload, apiGet } from "@/lib/api";
 import { formatMoney, formatQuantity } from "@/lib/format";
+
+const inventorySortOptions: { value: `${InventorySort}:${InventoryOrder}`; label: string }[] = [
+  { value: "name:asc", label: "名称升序" },
+  { value: "name:desc", label: "名称降序" },
+  { value: "quantity:asc", label: "数量升序" },
+  { value: "quantity:desc", label: "数量降序" },
+  { value: "code:asc", label: "编码升序" },
+  { value: "code:desc", label: "编码降序" },
+];
 
 export default function InventoryPage() {
   const { message } = App.useApp();
@@ -31,34 +41,53 @@ export default function InventoryPage() {
   const [exporting, setExporting] = useState(false);
   const [query, setQuery] = useState("");
   const [showLowStock, setShowLowStock] = useState(false);
+  const [minQuantity, setMinQuantity] = useState<number | null>(null);
+  const [maxQuantity, setMaxQuantity] = useState<number | null>(null);
+  const [sort, setSort] = useState<InventorySort>("name");
+  const [order, setOrder] = useState<InventoryOrder>("asc");
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(initialPagination);
+  const rangeError = inventoryQuantityRangeError(minQuantity, maxQuantity);
+  const filters = useMemo(() => ({
+    query,
+    lowStock: showLowStock,
+    minQuantity,
+    maxQuantity,
+    sort,
+    order,
+  }), [maxQuantity, minQuantity, order, query, showLowStock, sort]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const listParams = new URLSearchParams({ page: String(page) });
-      if (showLowStock) listParams.set("low_stock", "true");
-      if (query.trim()) listParams.set("q", query.trim());
+      const filtered = rangeError
+        ? Promise.resolve(null)
+        : apiGet<Paginated<InventorySnapshot>>(`/inventory?${inventoryListQuery({ ...filters, page })}`);
       const [visibleStock, stock, productList, shopList] = await Promise.all([
-        apiGet<Paginated<InventorySnapshot>>(`/inventory?${listParams}`),
+        filtered,
         apiGet<Paginated<InventorySnapshot>>("/inventory?all=true"),
         canLoadProducts ? apiGet<Paginated<Product>>("/products?all=true") : Promise.resolve({ items: [] as Product[] }),
         canLoadShops ? apiGet<Paginated<Shop>>("/shops?all=true") : Promise.resolve({ items: [] as Shop[] }),
       ]);
-      setVisibleInventory(visibleStock.items);
-      setPagination(visibleStock.pagination);
+      if (rangeError || !visibleStock) {
+        setError(rangeError);
+        setVisibleInventory([]);
+        setPagination(initialPagination);
+      } else {
+        setVisibleInventory(visibleStock.items);
+        setPagination(visibleStock.pagination);
+        if (visibleStock.pagination.page !== page) setPage(visibleStock.pagination.page);
+      }
       setInventory(stock.items);
       setProducts(productList.items);
       setShops(shopList.items);
-      if (visibleStock.pagination.page !== page) setPage(visibleStock.pagination.page);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [canLoadProducts, canLoadShops, page, query, showLowStock]);
+  }, [canLoadProducts, canLoadShops, filters, page, rangeError]);
 
   useEffect(() => {
     void load();
@@ -76,14 +105,14 @@ export default function InventoryPage() {
   }
 
   async function exportExcel() {
+    if (rangeError) {
+      message.error(rangeError);
+      return;
+    }
     setExporting(true);
     try {
-      const params = new URLSearchParams();
-      if (showLowStock) params.set("low_stock", "true");
-      if (query.trim()) params.set("q", query.trim());
-      const exportQuery = params.toString();
       const today = new Date().toISOString().slice(0, 10);
-      await apiDownload(`/inventory/export${exportQuery ? `?${exportQuery}` : ""}`, `inventory-${today}.xlsx`);
+      await apiDownload(`/inventory/export?${inventoryListQuery(filters)}`, `inventory-${today}.xlsx`);
       message.success("导出成功");
     } catch (err) {
       message.error(err instanceof Error ? err.message : "导出失败");
@@ -92,23 +121,18 @@ export default function InventoryPage() {
     }
   }
 
+  function changeSort(value: `${InventorySort}:${InventoryOrder}`) {
+    const [nextSort, nextOrder] = value.split(":") as [InventorySort, InventoryOrder];
+    setSort(nextSort);
+    setOrder(nextOrder);
+    setPage(1);
+  }
+
   return (
     <Flex gap={20} vertical>
       <PageHeader
         actions={
           <>
-            <Input
-              allowClear
-              aria-label="筛选商品"
-              placeholder="搜索商品名称或编码"
-              prefix={<SearchOutlined />}
-              style={{ width: 220 }}
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setPage(1);
-              }}
-            />
             <InventoryActions
               canAdjust={canAdjust}
               canInbound={canInbound}
@@ -123,9 +147,68 @@ export default function InventoryPage() {
             </Button>
           </>
         }
-        description="库存快照由入库、销售出库和调整流水自动更新。"
+        description="可按数量区间筛选，并按名称、数量或编码排序。"
         title="当前库存"
       />
+      <Card className="filter-card">
+        <Form layout="vertical" requiredMark={false}>
+          <Row gutter={[14, 0]}>
+            <Col lg={8} sm={12} xs={24}>
+              <Form.Item label="商品" style={{ marginBottom: 0 }}>
+                <Input
+                  allowClear
+                  placeholder="搜索名称或编码"
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setPage(1);
+                  }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={4} sm={6} xs={12}>
+              <Form.Item label="数量下限" style={{ marginBottom: 0 }}>
+                <InputNumber
+                  min={0}
+                  placeholder="不限"
+                  precision={0}
+                  style={{ width: "100%" }}
+                  value={minQuantity}
+                  onChange={(value) => {
+                    setMinQuantity(typeof value === "number" ? value : null);
+                    setPage(1);
+                  }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={4} sm={6} xs={12}>
+              <Form.Item label="数量上限" style={{ marginBottom: 0 }}>
+                <InputNumber
+                  min={0}
+                  placeholder="不限"
+                  precision={0}
+                  style={{ width: "100%" }}
+                  value={maxQuantity}
+                  onChange={(value) => {
+                    setMaxQuantity(typeof value === "number" ? value : null);
+                    setPage(1);
+                  }}
+                />
+              </Form.Item>
+            </Col>
+            <Col lg={8} sm={12} xs={24}>
+              <Form.Item label="排序" style={{ marginBottom: 0 }}>
+                <Select
+                  options={inventorySortOptions}
+                  style={{ width: "100%" }}
+                  value={`${sort}:${order}`}
+                  onChange={changeSort}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Card>
 
       <Row gutter={[12, 12]}>
         <Col md={8} xs={24}><Card className="metric-card"><Statistic title="库存品类" value={formatQuantity(inventory.length)} /></Card></Col>

@@ -53,6 +53,16 @@ func main() {
 			slog.Error("run lark bot", slog.Any("err", err))
 		}
 	}()
+	backupContext, cancelBackup := context.WithCancel(context.Background())
+	defer cancelBackup()
+	go services.RunBackupScheduler(backupContext, database, services.BackupSchedulerConfig{
+		DatabaseURL: cfg.DatabaseURL, BackupDir: cfg.BackupDir, AttachmentLimitMB: cfg.BackupAttachmentLimitMB,
+		Mail: services.MailConfig{
+			Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
+			From: cfg.SMTPFrom, TLSMode: cfg.SMTPTLS,
+		},
+		RecipientFallback: cfg.SMTPTo,
+	})
 
 	router := apihttp.NewRouter(cfg, database)
 	if err := router.Run(cfg.APIAddr); err != nil {

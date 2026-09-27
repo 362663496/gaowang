@@ -2,51 +2,47 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"strings"
+	"strconv"
 	"time"
 
 	"gaowang/apps/api/internal/config"
 	"gaowang/apps/api/internal/models"
 	"gaowang/apps/api/internal/services"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-const backupRecipientSettingKey = "backup.email_recipient"
+const backupRecipientSettingKey = services.BackupEmailRecipientKey
 
 type BackupHandler struct {
 	DB  *gorm.DB
 	Cfg config.Config
 }
 
-func (h BackupHandler) Run(c *gin.Context) {
-	started := time.Now()
-	job := models.BackupJob{StartedAt: started, Status: models.BackupStatusRunning, Recipient: h.backupRecipient()}
-	_ = h.DB.Create(&job).Error
+type updateBackupScheduleRequest struct {
+	Enabled *bool  `json:"enabled"`
+	Time    string `json:"time"`
+}
 
+func (h BackupHandler) Run(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
 	defer cancel()
-	path, size, err := services.BackupService{
-		DatabaseURL: h.Cfg.DatabaseURL, BackupDir: h.Cfg.BackupDir, AttachmentLimitMB: h.Cfg.BackupAttachmentLimitMB,
-	}.Run(ctx)
-
-	finished := time.Now()
-	job.FinishedAt = &finished
-	job.FilePath = path
-	job.FileSize = size
+	job, err := services.RunBackupJob(ctx, h.DB, h.backupRunInput(services.BackupTriggerManual))
+	if errors.Is(err, services.ErrBackupInProgress) {
+		writeError(c, http.StatusConflict, "BACKUP_IN_PROGRESS", "已有备份正在执行")
+		return
+	}
 	if err != nil {
-		job.Status = models.BackupStatusFailed
-		job.ErrorMessage = err.Error()
-		_ = h.DB.Save(&job).Error
-		recordAudit(c, h.DB, "backup.run_failed", "backup", job.ID.String(), map[string]string{"status": string(job.Status)})
+		if job.ID != uuid.Nil {
+			recordAudit(c, h.DB, "backup.run_failed", "backup", job.ID.String(), backupAuditMetadata(job, services.BackupTriggerManual))
+		}
 		writeError(c, http.StatusInternalServerError, "BACKUP_FAILED", err.Error())
 		return
 	}
-	job.Status = models.BackupStatusSuccess
-	h.sendMail(ctx, &job)
-	_ = h.DB.Save(&job).Error
-	recordAudit(c, h.DB, "backup.run_succeeded", "backup", job.ID.String(), map[string]string{"status": string(job.Status), "email_status": job.EmailStatus})
+	recordAudit(c, h.DB, "backup.run_succeeded", "backup", job.ID.String(), backupAuditMetadata(job, services.BackupTriggerManual))
 	c.JSON(http.StatusCreated, gin.H{"job": job})
 }
 
@@ -59,38 +55,66 @@ func (h BackupHandler) Latest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"job": job})
 }
 
-func (h BackupHandler) sendMail(ctx context.Context, job *models.BackupJob) {
-	if h.Cfg.SMTPHost == "" || job.Recipient == "" || h.Cfg.SMTPFrom == "" {
-		job.EmailStatus = "not_configured"
+func (h BackupHandler) GetSchedule(c *gin.Context) {
+	schedule, err := services.LoadBackupSchedule(h.DB, time.Now())
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to load backup schedule")
 		return
 	}
-	cfg := services.MailConfig{
-		Host: h.Cfg.SMTPHost, Port: h.Cfg.SMTPPort, Username: h.Cfg.SMTPUsername, Password: h.Cfg.SMTPPassword,
-		From: h.Cfg.SMTPFrom, To: job.Recipient, TLSMode: h.Cfg.SMTPTLS,
-	}
-	if !services.ShouldAttachBackup(job.FileSize, h.Cfg.BackupAttachmentLimitMB) {
-		if err := services.SendBackupNoticeMail(ctx, cfg, job.FilePath, job.FileSize); err != nil {
-			job.EmailStatus = "failed"
-			job.ErrorMessage = err.Error()
-			return
-		}
-		job.EmailStatus = "sent_without_attachment"
+	c.JSON(http.StatusOK, gin.H{"schedule": schedule})
+}
+
+func (h BackupHandler) UpdateSchedule(c *gin.Context) {
+	var req updateBackupScheduleRequest
+	if !bindJSON(c, &req) {
 		return
 	}
-	if err := services.SendBackupMail(ctx, cfg, job.FilePath); err != nil {
-		job.EmailStatus = "failed"
-		job.ErrorMessage = err.Error()
+	if req.Enabled == nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION", "请指定是否启用定时备份")
 		return
 	}
-	job.EmailStatus = "sent"
+	if err := services.ValidateBackupTime(req.Time); err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION", err.Error())
+		return
+	}
+	if err := services.SaveBackupSchedule(h.DB, *req.Enabled, req.Time); err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to save backup schedule")
+		return
+	}
+	recordAudit(c, h.DB, "backup.schedule_updated", "backup", services.BackupScheduleEnabledKey, map[string]string{
+		"enabled": strconv.FormatBool(*req.Enabled),
+		"time":    req.Time,
+	})
+	schedule, err := services.LoadBackupSchedule(h.DB, time.Now())
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to load backup schedule")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"schedule": schedule})
+}
+
+func (h BackupHandler) backupRunInput(trigger string) services.BackupRunInput {
+	recipient := h.backupRecipient()
+	return services.BackupRunInput{
+		DatabaseURL:       h.Cfg.DatabaseURL,
+		BackupDir:         h.Cfg.BackupDir,
+		AttachmentLimitMB: h.Cfg.BackupAttachmentLimitMB,
+		Mail: services.MailConfig{
+			Host: h.Cfg.SMTPHost, Port: h.Cfg.SMTPPort, Username: h.Cfg.SMTPUsername, Password: h.Cfg.SMTPPassword,
+			From: h.Cfg.SMTPFrom, To: recipient, TLSMode: h.Cfg.SMTPTLS,
+		},
+		Trigger: trigger,
+	}
 }
 
 func (h BackupHandler) backupRecipient() string {
-	var setting models.Setting
-	if h.DB != nil && h.DB.First(&setting, "key = ?", backupRecipientSettingKey).Error == nil {
-		if value := strings.TrimSpace(setting.Value); value != "" {
-			return value
-		}
+	return services.BackupRecipient(h.DB, h.Cfg.SMTPTo)
+}
+
+func backupAuditMetadata(job models.BackupJob, trigger string) map[string]string {
+	return map[string]string{
+		"status":       string(job.Status),
+		"email_status": job.EmailStatus,
+		"trigger":      trigger,
 	}
-	return strings.TrimSpace(h.Cfg.SMTPTo)
 }

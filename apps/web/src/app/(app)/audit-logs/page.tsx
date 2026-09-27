@@ -30,6 +30,7 @@ const actionOptions = [
   "user.create",
   "backup.run_succeeded",
   "backup.run_failed",
+  "backup.schedule_updated",
   "settings.update",
   "permission.updated",
 ] as const;

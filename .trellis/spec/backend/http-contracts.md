@@ -108,7 +108,7 @@ Responses keep `items` and add:
 - Clamp a page beyond the result set to the last page. Empty results use `total_pages: 0`.
 - `all=true` bypasses offset/limit but preserves the same response shape. Use it only for bounded option, summary, dashboard, or report consumers—not real list pages.
 - Frontend collection types use `Paginated<T>` and reset `page` to `1` when filters change.
-- Inventory sorts the complete filtered result by product name, product code, then product ID before pagination.
+- Inventory accepts optional inclusive `min_quantity` and `max_quantity`, plus `sort` (`name`, `quantity`, or `code`) and `order` (`asc` or `desc`). Omitted sort remains product name, product code, then product ID, all ascending. A chosen sort is the primary key; name, code, and product ID stay ascending tie-breakers. Invalid bounds or sort values are `400 VALIDATION`. List and export use the same filters and sort.
 - Stock movements accept optional `from`/`to` `YYYY-MM-DD` filters on immutable `created_at`; both dates are inclusive days interpreted at fixed UTC+8 boundaries.
 
 ### 4. Validation & Error Matrix
@@ -148,6 +148,42 @@ query.Find(&items)
 query.Session(&gorm.Session{}).Count(&total)
 query.Session(&gorm.Session{}).Offset(offset).Limit(size).Find(&items)
 ```
+
+## Scenario: Daily Backup Schedule
+
+### 1. Scope / Trigger
+
+Use this contract when showing or changing the in-process daily backup on the backups page. Manual `POST /backups/run` remains available.
+
+### 2. Signatures
+
+- `GET /api/v1/backups/schedule` requires `backup.read`.
+- `PUT /api/v1/backups/schedule` requires `backup.run` and accepts `{"enabled":false,"time":"02:00"}`.
+- Settings keys: `backup.schedule_enabled`, `backup.schedule_time`.
+- `BackupJob.Trigger` is `manual` or `scheduled`. `ScheduleSlot` is internal and omitted from JSON.
+
+### 3. Contracts
+
+- Time is `HH:MM` in fixed Asia/Shanghai. The default stored schedule is disabled at `02:00`.
+- The API process checks every 30 seconds. A due slot runs once, including a same-day catch-up if the process starts after the configured time. A failed slot is not retried until the next slot; the failed job remains visible and manual backup can still run.
+- Changing the time creates a new slot, so a later time the same day can still run.
+- Scheduled and manual backups share one runner, send the same mail, and write `backup.run_succeeded` or `backup.run_failed`. Scheduled audits have no actor and metadata `trigger=scheduled`. Saving the schedule writes `backup.schedule_updated`.
+- A backup already running returns `409 BACKUP_IN_PROGRESS` for the manual request and is skipped by that scheduler tick.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| Missing `enabled` or invalid `time` | `400 VALIDATION` |
+| Missing `backup.read` or `backup.run` | `403 FORBIDDEN` |
+| API token calling either schedule route | `403 FORBIDDEN` |
+| Another backup is running | manual `409 BACKUP_IN_PROGRESS`; scheduler waits for the next tick |
+| Backup command fails | job status `failed`, `500 BACKUP_FAILED` for manual runs |
+
+### 6. Tests Required
+
+- Assert the default schedule, a saved disabled time, invalid time rejection, reader denial, and token denial.
+- Assert a Shanghai slot runs once, a changed time can run again the same day, and a recent running job blocks the scheduler.
 
 ## Scenario: Optional Inventory Operation Notes
 

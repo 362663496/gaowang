@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"gaowang/apps/api/internal/config"
@@ -49,9 +50,12 @@ type inventoryResponse struct {
 }
 
 func (h InventoryHandler) ListCurrent(c *gin.Context) {
+	parsed, ok := inventoryQueryFromRequest(c)
+	if !ok {
+		return
+	}
 	var snapshots []models.InventorySnapshot
-	base := h.activeInventoryQuery(c.Query("low_stock") == "true", c.Query("q"))
-	query, meta, err := paginate(c, base)
+	query, meta, err := paginate(c, h.activeInventoryQuery(parsed))
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to count inventory")
 		return
@@ -78,8 +82,12 @@ func (h InventoryHandler) ListCurrent(c *gin.Context) {
 }
 
 func (h InventoryHandler) ExportCurrent(c *gin.Context) {
+	parsed, ok := inventoryQueryFromRequest(c)
+	if !ok {
+		return
+	}
 	var items []models.InventorySnapshot
-	if err := h.activeInventoryQuery(c.Query("low_stock") == "true", c.Query("q")).
+	if err := h.activeInventoryQuery(parsed).
 		Preload("Product").
 		Find(&items).Error; err != nil {
 		writeError(c, http.StatusInternalServerError, "INTERNAL", "failed to export inventory")
@@ -95,16 +103,107 @@ func (h InventoryHandler) ExportCurrent(c *gin.Context) {
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data)
 }
 
-func (h InventoryHandler) activeInventoryQuery(lowStock bool, keyword string) *gorm.DB {
+type inventoryListQuery struct {
+	lowStock    bool
+	keyword     string
+	minQuantity *int64
+	maxQuantity *int64
+	sort        string
+	order       string
+}
+
+func inventoryQueryFromRequest(c *gin.Context) (inventoryListQuery, bool) {
+	parsed, err := parseInventoryListQuery(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION", err.Error())
+		return inventoryListQuery{}, false
+	}
+	return parsed, true
+}
+
+func parseInventoryListQuery(c *gin.Context) (inventoryListQuery, error) {
+	parsed := inventoryListQuery{
+		lowStock: c.Query("low_stock") == "true",
+		keyword:  c.Query("q"),
+		sort:     "name",
+		order:    "asc",
+	}
+	if raw := strings.TrimSpace(c.Query("sort")); raw != "" {
+		switch raw {
+		case "name", "quantity", "code":
+			parsed.sort = raw
+		default:
+			return inventoryListQuery{}, errors.New("排序字段无效")
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("order")); raw != "" {
+		switch raw {
+		case "asc", "desc":
+			parsed.order = raw
+		default:
+			return inventoryListQuery{}, errors.New("排序方向无效")
+		}
+	}
+	minQuantity, err := parseOptionalQuantity(c.Query("min_quantity"), "数量下限")
+	if err != nil {
+		return inventoryListQuery{}, err
+	}
+	maxQuantity, err := parseOptionalQuantity(c.Query("max_quantity"), "数量上限")
+	if err != nil {
+		return inventoryListQuery{}, err
+	}
+	if minQuantity != nil && maxQuantity != nil && *minQuantity > *maxQuantity {
+		return inventoryListQuery{}, errors.New("数量下限不能大于上限")
+	}
+	parsed.minQuantity = minQuantity
+	parsed.maxQuantity = maxQuantity
+	return parsed, nil
+}
+
+func parseOptionalQuantity(raw string, label string) (*int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("%s必须是整数", label)
+	}
+	return &value, nil
+}
+
+func (h InventoryHandler) activeInventoryQuery(query inventoryListQuery) *gorm.DB {
 	base := h.DB.Model(&models.InventorySnapshot{}).
 		Joins("JOIN products ON products.id = inventory_snapshots.product_id").
 		Where("products.archived_at IS NULL")
-	if lowStock {
+	if query.lowStock {
 		base = base.Where("products.low_stock_threshold > 0 AND inventory_snapshots.quantity <= products.low_stock_threshold")
 	}
-	if keyword != "" {
-		like := "%" + keyword + "%"
+	if query.keyword != "" {
+		like := "%" + query.keyword + "%"
 		base = base.Where("products.name ILIKE ? OR products.code ILIKE ?", like, like)
+	}
+	if query.minQuantity != nil {
+		base = base.Where("inventory_snapshots.quantity >= ?", *query.minQuantity)
+	}
+	if query.maxQuantity != nil {
+		base = base.Where("inventory_snapshots.quantity <= ?", *query.maxQuantity)
+	}
+	return applyInventoryOrder(base, query.sort, query.order)
+}
+
+func applyInventoryOrder(base *gorm.DB, sort string, order string) *gorm.DB {
+	direction := "ASC"
+	if order == "desc" {
+		direction = "DESC"
+	}
+	switch sort {
+	case "quantity":
+		base = base.Order("inventory_snapshots.quantity " + direction)
+	case "code":
+		base = base.Order("products.code " + direction)
+	default:
+		base = base.Order("products.name " + direction)
 	}
 	return base.
 		Order("products.name ASC").

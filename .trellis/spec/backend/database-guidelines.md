@@ -44,7 +44,7 @@ References: `internal/services/inventory.go` and `internal/services/inventory_te
 
 ## Settings And Defaults
 
-Runtime settings use the `settings` key/value table. Database values override environment fallbacks, as shown by `BackupHandler.backupRecipient`. Keep the key constant next to its handler and test both stored and fallback behavior.
+Runtime settings use the `settings` key/value table. Database values override environment fallbacks, as shown by `BackupRecipient`. Keep a key constant next to its only handler. A key read by both a handler and a process scheduler lives with that service, as `backup.schedule_enabled` and `backup.schedule_time` do. Test both stored and fallback behavior.
 
 ## Avoid
 

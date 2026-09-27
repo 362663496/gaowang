@@ -78,6 +78,8 @@ func mountProtected(group *gin.RouterGroup, cfg config.Config, database *gorm.DB
 
 	group.GET("/audit-logs", RequirePermission(services.PermAuditRead), auditHandler.List)
 	group.GET("/backups/latest", RequirePermission(services.PermBackupRead), backupHandler.Latest)
+	group.GET("/backups/schedule", RequirePermission(services.PermBackupRead), backupHandler.GetSchedule)
+	group.PUT("/backups/schedule", RequirePermission(services.PermBackupRun), backupHandler.UpdateSchedule)
 	group.POST("/backups/run", RequirePermission(services.PermBackupRun), backupHandler.Run)
 	group.GET("/settings", RequirePermission(services.PermSettingRead), settingHandler.Get)
 	group.POST("/settings", RequirePermission(services.PermSettingUpdate), settingHandler.Update)

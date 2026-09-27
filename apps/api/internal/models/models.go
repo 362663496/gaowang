@@ -182,6 +182,8 @@ type BackupJob struct {
 	EmailStatus  string
 	Recipient    string
 	ErrorMessage string
+	Trigger      string  `gorm:"size:16;not null;default:manual"`
+	ScheduleSlot *string `json:"-" gorm:"size:32;uniqueIndex"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }

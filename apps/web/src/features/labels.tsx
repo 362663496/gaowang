@@ -54,6 +54,7 @@ const auditActions: Record<string, string> = {
   "user.delete": "删除用户",
   "backup.run_succeeded": "备份成功",
   "backup.run_failed": "备份失败",
+  "backup.schedule_updated": "修改定时备份",
   "settings.update": "设置修改",
   "permission.updated": "权限更新",
 };

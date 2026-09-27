@@ -56,7 +56,7 @@ type PermissionUser = {
 - Management `Table` pagination maps `current <- pagination.page`, `pageSize <- page_size`, and `total <- total`; `showSizeChanger` is false and page changes refetch the server.
 - Current inventory is the deliberate collection exception: render one bordered Ant Design `Card` per snapshot in a CSS `auto-fill` grid, then use standalone `Pagination` with the same server metadata.
 - Product selection uses one `Popover` image grid with 88px images and a name/code search input. Inventory actions receive only enabled, non-archived products; history filtering may include archived products with a visible status.
-- `ProductIdentity` is the shared direct-product display for tables, dashboard lists, reports, and confirmations: 40–48px current image first, then name/code and archived/missing-image status.
+- `ProductIdentity` is the shared direct-product display for tables, dashboard lists, reports, and confirmations: 40–48px current image first, then name/code and archived/missing-image status. Inventory and stock-movement rows pass `preview` so the current image opens the Ant Design preview.
 - Multipart product forms construct `FormData` explicitly. Create requires one `image`; edit omits `image` when no replacement file exists.
 - Server errors surface the original `Error.message` in a persistent `Alert`. Success uses contextual `message.success`.
 - Product `ImagePath` may reference a missing historical file; `ProductImage` switches to a square Ant Design `Avatar` with visible `待补图` text on empty path or `onError`.

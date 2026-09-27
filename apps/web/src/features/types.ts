@@ -150,8 +150,17 @@ export type BackupJob = {
   EmailStatus: string;
   Recipient: string;
   ErrorMessage: string;
+  Trigger: string;
   CreatedAt: string;
   UpdatedAt: string;
+};
+
+export type BackupSchedule = {
+  enabled: boolean;
+  time: string;
+  timezone: string;
+  next_run_at: string | null;
+  due: boolean;
 };
 
 export type AppSettings = {
